@@ -1375,6 +1375,7 @@ if (!gotTheLock) {
     try { app.setAppUserModelId('com.monkeypet.app'); } catch (_) {}
     loadSettings();
     ensureTodosFresh();
+    logCrash('boot', 'pid=' + process.pid + ' argv=' + process.argv.slice(1).join(' '));
     createWindow();
     shotMode();
     createTray();

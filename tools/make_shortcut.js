@@ -15,7 +15,7 @@ app.whenReady().then(() => {
   const opts = {
     target: path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe'),
     cwd: ROOT,
-    args: '.',
+    args: '--disable-gpu-sandbox "' + ROOT + '"',
     description: '小猴桌宠',
     icon: ICON,
     iconIndex: 0,
