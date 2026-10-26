@@ -16,7 +16,7 @@
   "build": {
     "appId": "com.monkeypet.app",
     "productName": "小猴桌宠",
-    "icon": "assets/monkey.ico",
+    "icon": "assets/icons/monkey.ico",
     "files": [
       "main.js",
       "preload.js",
@@ -36,7 +36,7 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "assets/monkey.ico"
+      "icon": "assets/icons/monkey.ico"
     },
     "nsis": {
       "oneClick": false,

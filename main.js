@@ -1173,7 +1173,7 @@ function refreshTray() {
 }
 function createTray() {
   try {
-    tray = new Tray(path.join(__dirname, 'assets', 'monkey.ico'));
+    tray = new Tray(path.join(__dirname, 'assets', 'icons', 'monkey.ico'));
     tray.setToolTip('小猴桌宠');
     tray.setContextMenu(Menu.buildFromTemplate(menuTemplate()));
     tray.on('double-click', toggleVisibility);
