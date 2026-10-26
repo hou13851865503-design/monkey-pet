@@ -118,9 +118,19 @@ function alphaAt(key, nx, ny) {
     alphaCache.set(p, m);
   }
   if (!m) return 255;
-  const x = clamp(Math.round(nx * (m.w - 1)), 0, m.w - 1);
-  const y = clamp(Math.round(ny * (m.h - 1)), 0, m.h - 1);
-  return m.buf[(y * m.w + x) * 4 + 3];
+  const cx = clamp(Math.round(nx * (m.w - 1)), 0, m.w - 1);
+  const cy = clamp(Math.round(ny * (m.h - 1)), 0, m.h - 1);
+  // 3x3 膨胀：手指/耳朵这些细边也点得到，避免"点不中小猴"
+  let a = 0;
+  for (let dx = -2; dx <= 2; dx += 2) {
+    for (let dy = -2; dy <= 2; dy += 2) {
+      const x = clamp(cx + dx, 0, m.w - 1);
+      const y = clamp(cy + dy, 0, m.h - 1);
+      const v = m.buf[(y * m.w + x) * 4 + 3];
+      if (v > a) a = v;
+    }
+  }
+  return a;
 }
 let lastIgnore = false;
 function setIgnore(on) {
@@ -129,6 +139,21 @@ function setIgnore(on) {
   if (on === lastIgnore) return;
   lastIgnore = on;
   try { win.setIgnoreMouseEvents(on, { forward: true }); } catch (_) {}
+}
+
+// 命中判定完全由主进程轮询驱动：不依赖渲染端能否收到 forwarded mousemove，
+// 即使当前处于"忽略鼠标"状态也照样每 30ms 校正一次，不会卡死。
+let currentFrameKey = 'd0';
+function hitTick() {
+  if (!win || isDragging || !win.isVisible()) return;
+  if (peeking) return;
+  if (settings.clickThrough) { setIgnore(true); return; }
+  const b = win.getBounds();
+  const p = screen.getCursorScreenPoint();
+  const nx = (p.x - b.x) / b.width;
+  const ny = (p.y - b.y) / b.height;
+  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return;
+  setIgnore(alphaAt(currentFrameKey, nx, ny) < 24);
 }
 
 // ---------- 光标下发 + 贴边探出检测 ----------
@@ -170,6 +195,7 @@ function startDrag() {
   if (peeking) unpeek();                 // 缩进去时先探出来再拖
   clearTimeout(peekTimer);
   isDragging = true;
+  setIgnore(false);                       // 开始拖拽先确保接收指针事件
   const b = win.getBounds();
   lockSize(b.width, b.height);
   const p = screen.getCursorScreenPoint();
@@ -1172,13 +1198,8 @@ function registerIpc() {
   ipcMain.on('show-context-menu', () => petContextMenu());
   ipcMain.on('show-emotion-menu', () => emotionMenu());
 
-  // 渲染端上报光标落在小猴身体的哪个点（归一化坐标），主进程按 PNG alpha 决定是否挡鼠标
-  ipcMain.on('hit-test', (_e, key, nx, ny) => {
-    if (!win || !win.isVisible()) return;
-    if (settings.clickThrough) { setIgnore(true); return; }
-    if (isDragging) return;                    // 拖拽过程中不切换，避免丢失指针事件
-    setIgnore(alphaAt(key, Number(nx), Number(ny)) < 24);
-  });
+  // 渲染端切帧时上报当前帧 key，供主进程做像素命中判定
+  ipcMain.on('frame', (_e, key) => { if (key) currentFrameKey = String(key); });
   ipcMain.on('focus-toggle', () => toggleFocus());
   ipcMain.on('open-todo-editor', () => openTodoEditor());
   ipcMain.handle('get-todos', () => todoData());
@@ -1327,6 +1348,7 @@ if (!gotTheLock) {
     createTray();
     // 有托盘就从小任务栏里移除，避免误点任务栏"关闭窗口"把程序关掉
     if (tray) { try { win.setSkipTaskbar(true); } catch (_) {} }
+    setInterval(hitTick, 30);   // 像素命中判定：20~33fps 校正一次
     registerIpc();
     setClickThrough(settings.clickThrough);
     startIdleWatch();

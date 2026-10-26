@@ -34,6 +34,8 @@
     if (current && imgs[current]) imgs[current].classList.remove('active');
     if (imgs[key]) imgs[key].classList.add('active');
     current = key;
+    // 告诉主进程当前帧，主进程据此做"透明处穿透"的像素判定
+    try { if (window.pet && window.pet.setFrame) window.pet.setFrame(key); } catch (_) {}
   }
 
   // 朝向帧映射：k∈[-2,2] => 帧序号（禁用 04/05/06 背面帧）
@@ -170,18 +172,8 @@
   })();
 
   // ---- 透明区域不挡鼠标 ----
-  // 把光标位置（归一化）上报给主进程，主进程读当前帧 PNG 的 alpha：
-  // 落在透明像素上 => 开启鼠标穿透；落在小猴身上 => 正常接收点击。
-  let lastHitAt = 0;
-  if (ipc && ipc.hitTest) {
-    window.addEventListener('mousemove', (e) => {
-      if (!current) return;
-      const now = Date.now();
-      if (now - lastHitAt < 35) return;
-      lastHitAt = now;
-      ipc.hitTest(current, e.clientX / window.innerWidth, e.clientY / window.innerHeight);
-    });
-  }
+  // 由主进程每 30ms 读取真实光标位置 + 当前帧 alpha 判断并切换，渲染端不参与，
+  // 这样拖拽过程中不会被"忽略鼠标"打断。
 
   // ---- 拖拽 / 单击 / 双击 / 长按 ----
   let dragging = false, moved = false;
