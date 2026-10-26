@@ -145,7 +145,7 @@ function setIgnore(on) {
 // 即使当前处于"忽略鼠标"状态也照样每 30ms 校正一次，不会卡死。
 let currentFrameKey = 'd0';
 function hitTick() {
-  if (!win || isDragging || !win.isVisible()) return;
+  if (!win || win.isDestroyed() || isDragging || !win.isVisible()) return;
   if (peeking) return;
   if (settings.clickThrough) { setIgnore(true); return; }
   const b = win.getBounds();
@@ -159,7 +159,7 @@ function hitTick() {
 // ---------- 光标下发 + 贴边探出检测 ----------
 let lastCursorX = null, lastCursorY = null;
 function sendCursor() {
-  if (!win || isDragging) return;
+  if (!win || win.isDestroyed() || isDragging) return;
   const b = win.getBounds();
   const p = screen.getCursorScreenPoint();
 
