@@ -41,7 +41,9 @@ while ($true) {
           $ww = $r.Right - $r.Left
           $wh = $r.Bottom - $r.Top
           if (($mw -gt 0) -and ($mh -gt 0)) {
-            if (($ww -ge [int]($mw * 0.95)) -and ($wh -ge [int]($mh * 0.95))) { $full = 1 }
+            # 必须几乎盖满整个显示器（含任务栏区域）才算全屏。
+            # 普通"最大化"窗口只到工作区（差一条任务栏），不会命中，避免误隐藏。
+            if (($ww -ge ($mw - 2)) -and ($wh -ge ($mh - 2))) { $full = 1 }
           }
         }
       }

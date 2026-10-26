@@ -3,7 +3,7 @@
 // P7 缩放 / 位置记忆 / 拖拽（resizable:false 会让 setPosition 失效）
 // P10 尺寸锁定 + 平滑等比缩放
 // P11 事件反应 / 边缘吸附+贴边隐藏 / 撸它+双击情绪菜单 / 防打扰 / 番茄钟 / 今日待办气泡
-const { app, BrowserWindow, ipcMain, Menu, Tray, screen, globalShortcut, powerMonitor, Notification, clipboard, net, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, screen, globalShortcut, powerMonitor, Notification, clipboard, net, dialog, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -48,12 +48,25 @@ function saveSettings() {
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+// ---------- 崩溃 / 异常日志（排查闪退用）----------
+// 写到 %APPDATA%\monkey-pet\crash.log，出现问题时把这个文件发我就能定位。
+function logCrash(tag, e) {
+  try {
+    const line = '[' + new Date().toISOString() + '] ' + tag + ' :: ' +
+      (e && (e.stack || e.message) ? (e.stack || e.message) : String(e)) + '\n';
+    fs.appendFileSync(path.join(app.getPath('userData'), 'crash.log'), line);
+  } catch (_) {}
+}
+process.on('uncaughtException', (e) => logCrash('uncaughtException', e));
+process.on('unhandledRejection', (e) => logCrash('unhandledRejection', e));
+
 let win;
 let tray;
 let bubbleWin = null;
 let todoWin = null;
 let facingTimer = null;
 let isDragging = false;
+let isQuitting = false;
 
 // ---------- 尺寸锁定 ----------
 // 让窗口永远 resizable:true（Windows 上 resizable:false 会让 setPosition 静默失效），
@@ -78,6 +91,44 @@ function workAreaFor(b) {
   } catch (_) {
     return screen.getPrimaryDisplay().workArea;
   }
+}
+
+// ---------- 按像素命中：透明的部分不挡鼠标 ----------
+// 窗口是一整块矩形，如果整块都接收鼠标，就会挡住后面的应用。
+// 这里读取当前帧 PNG 的 alpha：光标落在透明像素上就开启"忽略鼠标"，
+// 落在小猴身上才接收点击。配合 forward:true，忽略状态下仍能收到 mousemove 以便切回来。
+const alphaCache = new Map();
+function assetPathForKey(key) {
+  if (!key) return null;
+  if (key.startsWith('e_')) return path.join(__dirname, 'assets', 'emotion_' + key.slice(2) + '.png');
+  const n = Number(String(key).slice(1));
+  if (!Number.isFinite(n)) return null;
+  return path.join(__dirname, 'assets', String(n + 1).padStart(2, '0') + '.png');
+}
+function alphaAt(key, nx, ny) {
+  const p = assetPathForKey(key);
+  if (!p) return 255;
+  let m = alphaCache.get(p);
+  if (m === undefined) {
+    try {
+      const img = nativeImage.createFromPath(p);
+      if (img.isEmpty()) m = null;
+      else { const s = img.getSize(); m = { w: s.width, h: s.height, buf: img.toBitmap() }; }
+    } catch (_) { m = null; }
+    alphaCache.set(p, m);
+  }
+  if (!m) return 255;
+  const x = clamp(Math.round(nx * (m.w - 1)), 0, m.w - 1);
+  const y = clamp(Math.round(ny * (m.h - 1)), 0, m.h - 1);
+  return m.buf[(y * m.w + x) * 4 + 3];
+}
+let lastIgnore = false;
+function setIgnore(on) {
+  if (!win) return;
+  on = !!on;
+  if (on === lastIgnore) return;
+  lastIgnore = on;
+  try { win.setIgnoreMouseEvents(on, { forward: true }); } catch (_) {}
 }
 
 // ---------- 光标下发 + 贴边探出检测 ----------
@@ -1039,7 +1090,8 @@ function setClickThrough(on) {
   settings.clickThrough = !!on;
   saveSettings();
   if (win) {
-    win.setIgnoreMouseEvents(settings.clickThrough, { forward: true });
+    lastIgnore = !settings.clickThrough;   // 强制下一次 setIgnore 生效
+    setIgnore(settings.clickThrough);
     win.webContents.send('clickthrough-state', settings.clickThrough);
   }
   refreshTray();
@@ -1059,6 +1111,7 @@ function setOpenAtLogin(on) {
 
 // ---------- 菜单 ----------
 function quitApp() {
+  isQuitting = true;
   try { if (win) win.destroy(); } catch (_) {}
   app.quit();
 }
@@ -1118,6 +1171,14 @@ function registerIpc() {
   });
   ipcMain.on('show-context-menu', () => petContextMenu());
   ipcMain.on('show-emotion-menu', () => emotionMenu());
+
+  // 渲染端上报光标落在小猴身体的哪个点（归一化坐标），主进程按 PNG alpha 决定是否挡鼠标
+  ipcMain.on('hit-test', (_e, key, nx, ny) => {
+    if (!win || !win.isVisible()) return;
+    if (settings.clickThrough) { setIgnore(true); return; }
+    if (isDragging) return;                    // 拖拽过程中不切换，避免丢失指针事件
+    setIgnore(alphaAt(key, Number(nx), Number(ny)) < 24);
+  });
   ipcMain.on('focus-toggle', () => toggleFocus());
   ipcMain.on('open-todo-editor', () => openTodoEditor());
   ipcMain.handle('get-todos', () => todoData());
@@ -1213,8 +1274,21 @@ function createWindow() {
   win.on('closed', () => {
     if (facingTimer) clearInterval(facingTimer);
   });
-  // Windows 已知 bug electron#24910：无边框窗口任务栏"关闭窗口"可能卡住
-  win.on('close', () => { try { win.destroy(); } catch (_) {} });
+
+  // 关闭（Alt+F4 等）默认只"隐藏"，从托盘能叫回来；只有托盘"退出"才真正结束进程。
+  // 避免误触关闭就整个程序消失。
+  win.on('close', (e) => {
+    if (isQuitting) return;
+    e.preventDefault();
+    try { win.hide(); } catch (_) {}
+    hideBubble();
+    refreshTray();
+  });
+
+  win.webContents.on('render-process-gone', (_e, details) => {
+    logCrash('render-process-gone', JSON.stringify(details));
+    try { win.reload(); } catch (_) {}   // 页面进程挂掉时自动重载，而不是整只消失
+  });
 
   facingTimer = setInterval(sendCursor, POLL_MS);
   if (startHidden) win.hide();
@@ -1239,6 +1313,9 @@ if (!gotTheLock) {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
+    // 让用户明确知道"不是闪退，是小猴已经在跑了"
+    emitEmotion('wink');
+    showBubble({ title: '小猴', text: '我在这儿～ 已经有一只啦，不用再开' }, 3200);
   });
 
   app.whenReady().then(() => {
@@ -1248,6 +1325,8 @@ if (!gotTheLock) {
     createWindow();
     shotMode();
     createTray();
+    // 有托盘就从小任务栏里移除，避免误点任务栏"关闭窗口"把程序关掉
+    if (tray) { try { win.setSkipTaskbar(true); } catch (_) {} }
     registerIpc();
     setClickThrough(settings.clickThrough);
     startIdleWatch();
@@ -1284,6 +1363,8 @@ if (!gotTheLock) {
       showBubble({ title: '小猴', text: g.text }, 5000);
     }, 1600);
   });
+
+  app.on('child-process-gone', (_e, details) => logCrash('child-process-gone', JSON.stringify(details)));
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

@@ -27,6 +27,12 @@
       position: absolute; inset: 0;
       transform-origin: center bottom;
       animation: breathe 3.4s ease-in-out infinite;
+      /* 描边 + 投影：压在复杂界面上也能看清轮廓 */
+      filter: drop-shadow(0 0 1.2px rgba(0, 0, 0, .55)) drop-shadow(0 4px 10px rgba(0, 0, 0, .32));
+    }
+    /* 拖拽时加强轮廓，明确"我正被拿起" */
+    body.dragging #breath {
+      filter: drop-shadow(0 0 2px rgba(0, 0, 0, .9)) drop-shadow(0 10px 20px rgba(0, 0, 0, .5));
     }
     @keyframes breathe {
       0%, 100% { transform: scaleY(1) translateY(0); }

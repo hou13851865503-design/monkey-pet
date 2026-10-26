@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('pet', {
   // ---------- 光标偏移（主进程轮询真实鼠标位置下发）----------
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, dx, dy) => cb(dx, dy)),
 
+  // ---------- 像素级命中：透明处不挡鼠标 ----------
+  hitTest: (key, nx, ny) => ipcRenderer.send('hit-test', key, nx, ny),
+
   // ---------- 点击穿透状态 ----------
   onClickThrough: (cb) => ipcRenderer.on('clickthrough-state', (_e, on) => cb(on)),
 
