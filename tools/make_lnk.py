@@ -3,6 +3,7 @@
 # 目标：项目里的 electron.exe，带 monkey.ico 图标
 import os
 import struct
+import sys
 
 # 全部用相对项目根目录的路径，避免把本机绝对路径写进仓库
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,8 +11,18 @@ TARGET = os.path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
 WORKDIR = ROOT
 ICON = os.path.join(ROOT, 'assets', 'monkey.ico')
 ARGS = "."
-# 输出放在项目根目录；需要放到桌面可自行改这里
-OUT = os.path.join(ROOT, '桌宠.lnk')
+# 可选参数：make_lnk.py [输出路径] [图标路径]
+if len(sys.argv) > 1:
+    OUT = sys.argv[1]
+else:
+    OUT = os.path.join(ROOT, '桌宠.lnk')
+if len(sys.argv) > 2:
+    ICON = sys.argv[2]
+
+# Git Bash / MSYS 可能把参数里的反斜杠转成正斜杠，这里统一回 Windows 风格
+if os.name == 'nt':
+    OUT = OUT.replace('/', '\\')
+    ICON = ICON.replace('/', '\\')
 
 def u16(n): return struct.pack('<H', n)
 def u32(n): return struct.pack('<I', n)
@@ -19,7 +30,9 @@ def i32(n): return struct.pack('<i', n)
 
 def strdata(s):
     b = s.encode('utf-16-le')
-    return u16(len(s)) + b + b'\x00\x00'   # 字符数(不含终止符) + UTF-16LE + 终止符
+    # Unicode 字符串不需要额外终止符；CountCharacters 只算字符数。
+    # 多写 \x00\x00 会让后续字段整体错位（ICON 会读成 ARGS 的内容）。
+    return u16(len(s)) + b
 
 # ---- LinkInfo（指向本地文件的 LocalBasePath）----
 vol = u32(0x10) + u32(3) + u32(0) + u32(0x10)   # VolumeID(无卷标)
@@ -47,7 +60,9 @@ header = (u32(0x4C) + CLSID + u32(linkflags) + u32(0x20) +
           b'\x00'*24 +            # 3x uint64 时间
           u32(0) + i32(0) + i32(1) + u16(0) + u16(0) + u32(0) + u32(0))
 
-lnk = header + linkinfo + sd + b'\x00\x00\x00\x00'   # 末尾 ExtraData 终止块
+# 注意：ShellLinkHeader(76B) 之后必须先有 2 字节 IDListSize（这里为 0，表示无 IDList），
+# 少了它资源管理器会把 LinkInfo 当作 IDList 解析，整个 .lnk 被判为无效（显示白页）。
+lnk = header + u16(0) + linkinfo + sd + b'\x00\x00\x00\x00'   # 末尾 ExtraData 终止块
 
 out = OUT
 with open(out, 'wb') as f:
