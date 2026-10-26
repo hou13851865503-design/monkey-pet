@@ -1145,6 +1145,31 @@ function registerIpc() {
   ipcMain.on('morning-report', () => morningReport(true));
 }
 
+function shotMode() {
+  const out = process.env.PET_SHOT;
+  if (!out) return;
+  // 放大到 2 倍再截，保证清晰度
+  setTimeout(() => {
+    try {
+      const { w, h } = sizeForZoom(2);
+      unlockSize();
+      win.setBounds({ x: 200, y: 150, width: w, height: h });
+      lockSize(w, h);
+    } catch (_) {}
+  }, 700);
+  setTimeout(async () => {
+    try {
+      const img = await win.webContents.capturePage();
+      fs.writeFileSync(out, img.toPNG());
+      const s = img.getSize();
+      console.log('[shot] wrote ' + out + ' ' + s.width + 'x' + s.height);
+    } catch (e) {
+      console.log('[shot] err ' + (e && e.message));
+    }
+    if (process.env.PET_SHOT_EXIT) app.quit();
+  }, 2600);
+}
+
 // ---------- 主窗口 ----------
 function createWindow() {
   const z = clamp(settings.zoom || 1, ZOOM_MIN, ZOOM_MAX);
@@ -1193,6 +1218,15 @@ function createWindow() {
 
   facingTimer = setInterval(sendCursor, POLL_MS);
   if (startHidden) win.hide();
+
+  if (process.env.PET_DEBUG) {
+    setTimeout(() => {
+      try {
+        console.log('[debug] visible=' + win.isVisible() + ' bounds=' + JSON.stringify(win.getBounds()) +
+          ' displays=' + JSON.stringify(screen.getAllDisplays().map((d) => d.bounds)));
+      } catch (e) { console.log('[debug] err ' + e.message); }
+    }, 2500);
+  }
 }
 
 // ---------- 单实例锁 ----------
@@ -1212,6 +1246,7 @@ if (!gotTheLock) {
     loadSettings();
     ensureTodosFresh();
     createWindow();
+    shotMode();
     createTray();
     registerIpc();
     setClickThrough(settings.clickThrough);

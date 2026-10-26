@@ -11,7 +11,13 @@
 **纯 Electron + 原生 HTML/CSS/JS**，没有前端框架，也没有打包器 —— 逻辑全在 `main.js` / `preload.js` / `renderer.js` 里。
 
 <p align="center">
-  <img src="assets/contact_emotions_dark.png" width="460" alt="小猴的八向转头与情绪表情" />
+  <img src="docs/screenshot.png" width="320" alt="小猴实际运行截图" />
+  <br />
+  <sub>实际运行时的窗口截图（透明背景，2× 截取）</sub>
+</p>
+
+<p align="center">
+  <img src="assets/contact_emotions_dark.png" width="440" alt="小猴的八向转头与情绪表情" />
   <br />
   <sub>八向转头 + 9 种情绪（素材预览）</sub>
 </p>
