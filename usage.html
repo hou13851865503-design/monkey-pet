@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>小猴桌宠 · 功能说明</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #f6f7fa; color: #20242c;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      font-size: 14px; line-height: 1.55;
+    }
+    header {
+      position: sticky; top: 0; z-index: 5;
+      background: rgba(246, 247, 250, 0.95);
+      backdrop-filter: blur(6px);
+      border-bottom: 1px solid #e2e7f0;
+      padding: 14px 20px 10px;
+    }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .sub { font-size: 12px; color: #7b8494; margin-bottom: 10px; }
+    #q {
+      width: 100%; max-width: 420px; padding: 9px 12px;
+      border: 1px solid #dfe3ea; border-radius: 10px; font-size: 13px; outline: none;
+      background: #fff;
+    }
+    #q:focus { border-color: #5b9bff; box-shadow: 0 0 0 3px rgba(91,155,255,.15); }
+    main { padding: 16px 20px 40px; max-width: 1000px; margin: 0 auto; }
+    section { margin-bottom: 22px; }
+    h2 {
+      font-size: 15px; margin: 0 0 10px; padding-left: 10px;
+      border-left: 3px solid #3b82f6; line-height: 1.2;
+    }
+    table {
+      width: 100%; border-collapse: collapse; background: #fff;
+      border: 1px solid #e6e9f0; border-radius: 12px; overflow: hidden;
+    }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #eef1f6; vertical-align: top; }
+    th { background: #f1f5fb; font-size: 12px; color: #5b667a; font-weight: 700; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    td.k { width: 190px; font-weight: 600; color: #1f3a63; }
+    td.how { width: 240px; }
+    td.note { color: #5b667a; }
+    kbd {
+      display: inline-block; padding: 1px 7px; margin: 0 1px;
+      background: #eef2f8; border: 1px solid #dde4ef; border-bottom-width: 2px;
+      border-radius: 5px; font-family: Consolas, monospace; font-size: 12px; color: #24324a;
+    }
+    .hot { background: #fff7e6; }
+    .tag { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 11px; background: #e8f1ff; color: #2f6fd0; }
+    .tag.free { background: #e9f7ee; color: #2f8a52; }
+    .tag.need { background: #fdecec; color: #c04a45; }
+    .cat { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; }
+    .cat a { font-size: 12px; color: #2f6fd0; text-decoration: none; background: #eaf2ff; padding: 4px 10px; border-radius: 999px; }
+    .cat a:hover { background: #dbe9ff; }
+    .empty { padding: 24px; text-align: center; color: #9aa2b1; display: none; }
+    .kbgrid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 6px 16px; background: #fff; border: 1px solid #e6e9f0;
+      border-radius: 12px; padding: 12px 14px;
+    }
+    .kbgrid .row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #33405a; }
+    .kbgrid .row .keys { flex: 0 0 118px; }
+    @media print {
+      header { position: static; }
+      #q, .cat { display: none; }
+      body { background: #fff; }
+      table { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>小猴桌宠 · 功能说明</h1>
+    <div class="sub">按功能查用法；想找某个词，直接在下面搜（比如“剪贴板”“快捷键”）。</div>
+    <input id="q" type="search" placeholder="搜索功能 / 快捷键 / 关键词…" />
+    <div class="cat">
+      <a href="#s1">基础操作</a><a href="#s2">桌面行为</a><a href="#s3">效率工具</a><a href="#s4">AI</a><a href="#s5">快捷键</a><a href="#s6">常见问题</a>
+    </div>
+  </header>
+
+  <main>
+    <section id="quick">
+      <h2>快捷键速查</h2>
+      <div class="kbgrid">
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></span>点击穿透</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></span>显示 / 隐藏</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></span>专注 25 分钟</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></span>今日待办</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></span>剪贴板历史</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></span>系统状态</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></span>课程 / 日程</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></span>AI 对话</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></span>AI 设置</div>
+        <div class="row"><span class="keys"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></span>每日早报</div>
+      </div>
+    </section>
+
+    <section id="s1">
+      <h2>基础操作</h2>
+      <table>
+        <thead><tr><th>功能</th><th>怎么用</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr class="item"><td class="k">移动位置</td><td class="how">按住小猴拖动</td><td class="note">拖动只移动、不会改变大小</td></tr>
+          <tr class="item"><td class="k">换表情（随机）</td><td class="how">单击小猴</td><td class="note">随机一个积极表情</td></tr>
+          <tr class="item"><td class="k">选表情</td><td class="how">双击小猴</td><td class="note">弹出 9 种情绪菜单任选</td></tr>
+          <tr class="item"><td class="k">撸它</td><td class="how">鼠标在身上左右快速来回划</td><td class="note">害羞 / 喜欢，冷却 2.5 秒</td></tr>
+          <tr class="item"><td class="k">缩放</td><td class="how">按住左键滚轮，或 <kbd>Ctrl</kbd>+滚轮</td><td class="note">0.5×～2.5× 等比缩放，自动记住</td></tr>
+          <tr class="item"><td class="k">打开菜单</td><td class="how">右键小猴 / 托盘图标右键</td><td class="note">所有功能入口都在这里</td></tr>
+          <tr class="item"><td class="k">显示 / 隐藏</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td class="note">也可点托盘图标双击</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="s2">
+      <h2>桌面行为</h2>
+      <table>
+        <thead><tr><th>功能</th><th>怎么用</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr class="item"><td class="k">自动睡觉 / 醒来</td><td class="how">无需操作</td><td class="note">系统闲置 45 秒睡着，一动键鼠就醒</td></tr>
+          <tr class="item"><td class="k">整点问候</td><td class="how">无需操作</td><td class="note">早晚 / 中午 / 下午 / 深夜不同台词，启动时也会打招呼</td></tr>
+          <tr class="item"><td class="k">边缘吸附</td><td class="how">拖到屏幕边缘 16px 内松手</td><td class="note">自动贴边</td></tr>
+          <tr class="item"><td class="k">贴边半隐藏</td><td class="how">停靠后不动 4 秒</td><td class="note">自动缩成一条；鼠标移到那条上会探出来</td></tr>
+          <tr class="item"><td class="k">防打扰</td><td class="how">默认开启，菜单可关</td><td class="note">前台全屏（游戏/全屏会议/全屏视频）时自动隐藏，退出全屏自动回来</td></tr>
+          <tr class="item"><td class="k">点击穿透</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td class="note">开启后鼠标可穿过小猴点到后面的窗口</td></tr>
+          <tr class="item"><td class="k">开机自启</td><td class="how">菜单「开机自启」勾选</td><td class="note">默认开启</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="s3">
+      <h2>效率工具</h2>
+      <table>
+        <thead><tr><th>功能</th><th>怎么用</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr class="item"><td class="k">番茄钟（25 分钟）</td><td class="how">按住小猴 0.65 秒 / 菜单 / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td class="note">专注时变思考脸，每分钟报剩余；结束弹系统通知</td></tr>
+          <tr class="item"><td class="k">今日待办</td><td class="how">菜单「今日待办…（编辑）」</td><td class="note">勾选/增删后保存；「查看今日待办」用气泡展示；跨天自动重置勾选</td></tr>
+          <tr class="item"><td class="k">剪贴板历史</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></td><td class="note">最近 50 条；可搜索，↑↓ 选择、Enter 复制回剪贴板；<b>只存内存、重启清空</b></td></tr>
+          <tr class="item"><td class="k">系统监控</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td class="note">气泡显示 CPU、内存、网络 ↓/↑ 速度</td></tr>
+          <tr class="item"><td class="k">课程表 / 日程</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></td><td class="note">加每周课程或一次性日程，提前 N 分钟气泡提醒；「查看今日课程」看当天课表</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="s4">
+      <h2>AI 功能</h2>
+      <table>
+        <thead><tr><th>功能</th><th>怎么用</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr class="item"><td class="k">AI 设置 <span class="tag">第一次必做</span></td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></td><td class="note">填 Base URL / API Key / 模型名，点「测试连接」验证后再保存</td></tr>
+          <tr class="item"><td class="k">AI 对话</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></td><td class="note"><span class="tag need">需 Key</span> 任意 OpenAI 兼容接口</td></tr>
+          <tr class="item"><td class="k">名片识别</td><td class="how">图片拖到小猴身上 / 菜单「识别名片图片…」</td><td class="note"><span class="tag need">需 Key + 视觉模型</span> 抽取姓名/公司/职位/电话/邮箱/地址/网址，可复制 JSON</td></tr>
+          <tr class="item"><td class="k">语音朗读（TTS）</td><td class="how">AI 设置里勾选「语音朗读」</td><td class="note"><span class="tag free">免费</span> 用 Windows 系统语音；没声音就去系统设置装中文语音</td></tr>
+          <tr class="item"><td class="k">每日早报</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> 或菜单</td><td class="note"><span class="tag free">无需 Key</span> 天气 + 一条热点；设好时间会每天自动弹</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="s5">
+      <h2>快捷键总表</h2>
+      <table>
+        <thead><tr><th>快捷键</th><th>功能</th><th>备注</th></tr></thead>
+        <tbody>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd></td><td>点击穿透开关</td><td class="note">再按一次关闭</td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></td><td>显示 / 隐藏小猴</td><td class="note"></td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></td><td>开始 / 停止专注</td><td class="note">25 分钟番茄钟</td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>O</kbd></td><td>今日待办（编辑）</td><td class="note"></td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></td><td>剪贴板历史</td><td class="note"></td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd></td><td>系统状态</td><td class="note">CPU / 内存 / 网速</td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd></td><td>课程表 / 日程</td><td class="note"></td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></td><td>AI 对话</td><td class="note">需配置 Key</td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></td><td>AI 设置</td><td class="note"></td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>立即生成每日早报</td><td class="note">无需 Key</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="s6">
+      <h2>常见问题</h2>
+      <table>
+        <thead><tr><th>现象</th><th>原因 / 解决</th><th></th></tr></thead>
+        <tbody>
+          <tr class="item"><td class="k">改了代码没生效</td><td class="note">单实例锁：要先右键「退出」再重新打开，直接双击只会聚焦旧实例</td><td></td></tr>
+          <tr class="item"><td class="k">AI 对话报错</td><td class="note">Key/Base URL/模型名不对；或没开代理（本程序走系统代理，FlClash 要开着）</td><td></td></tr>
+          <tr class="item"><td class="k">名片识别没结果</td><td class="note">模型不支持图片输入，换视觉模型（如 gpt-4o-mini / gpt-4o）</td><td></td></tr>
+          <tr class="item"><td class="k">TTS 没声音</td><td class="note">系统没装中文语音：Windows 设置 → 时间和语言 → 语音，添加中文</td><td></td></tr>
+          <tr class="item"><td class="k">网速显示 N/A</td><td class="note">PowerShell 的 Get-NetAdapterStatistics 不可用；CPU/内存仍然正常</td><td></td></tr>
+          <tr class="item"><td class="k">早报天气/热帖失败</td><td class="note">网络或代理问题；天气用 wttr.in、热帖用 V2EX，可隔天再试</td><td></td></tr>
+          <tr class="item"><td class="k">配置存在哪</td><td class="note"><code>%APPDATA%\monkey-pet\settings.json</code>（含 API Key，注意别外传）</td><td></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <div class="empty" id="empty">没有匹配的内容，换个关键词试试～</div>
+  </main>
+
+  <script>
+    const q = document.getElementById('q');
+    const empty = document.getElementById('empty');
+    const quick = document.getElementById('quick');
+    const sections = Array.from(document.querySelectorAll('main section')).filter(function (s) { return s.id !== 'quick'; });
+
+    q.addEventListener('input', function () {
+      const kw = q.value.trim().toLowerCase();
+      quick.style.display = kw ? 'none' : '';
+      let total = 0;
+      sections.forEach(function (sec) {
+        const rows = Array.from(sec.querySelectorAll('tr.item'));
+        let visible = 0;
+        rows.forEach(function (tr) {
+          const text = tr.textContent.toLowerCase();
+          const ok = !kw || text.indexOf(kw) >= 0;
+          tr.style.display = ok ? '' : 'none';
+          if (ok) visible++;
+        });
+        sec.style.display = visible ? '' : 'none';
+        total += visible;
+      });
+      empty.style.display = total ? 'none' : 'block';
+    });
+  </script>
+</body>
+</html>

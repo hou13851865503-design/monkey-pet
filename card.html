@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>名片识别</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: #f6f7fa; color: #20242c;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    .sub { font-size: 12px; color: #7b8494; margin-bottom: 14px; }
+    .card { background: #fff; border: 1px solid #e6e9f0; border-radius: 12px; padding: 8px 14px; }
+    .kv { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px dashed #eef1f6; font-size: 13px; }
+    .kv:last-child { border-bottom: 0; }
+    .k { flex: 0 0 68px; color: #8b93a1; }
+    .v { flex: 1; min-width: 0; word-break: break-all; user-select: text; }
+    .v.empty { color: #c3c9d4; }
+    .state { padding: 26px 10px; text-align: center; color: #7b8494; font-size: 13px; line-height: 1.6; }
+    .state.err { color: #d9534f; }
+    .spin {
+      width: 22px; height: 22px; margin: 0 auto 10px;
+      border: 3px solid #e2e8f2; border-top-color: #3b82f6; border-radius: 50%;
+      animation: sp 0.8s linear infinite;
+    }
+    @keyframes sp { to { transform: rotate(360deg); } }
+    .foot { display: flex; gap: 8px; margin-top: 12px; }
+    button { padding: 9px 14px; border: 0; border-radius: 9px; font-size: 13px; cursor: pointer; background: #e8edf6; color: #33405a; }
+    button.primary { background: #3b82f6; color: #fff; }
+    pre { background: #0f1420; color: #cfe3ff; padding: 10px; border-radius: 10px; font-size: 12px; overflow: auto; max-height: 180px; margin: 12px 0 0; }
+  </style>
+</head>
+<body>
+  <h1>名片识别</h1>
+  <div class="sub">把小猴身上的名片图片交给 AI 抽取成结构化字段</div>
+
+  <div id="view" class="card">
+    <div class="state">等待图片…<br /><span style="font-size:12px">把名片图片直接拖到小猴身上即可</span></div>
+  </div>
+
+  <div class="foot">
+    <button id="copyBtn" class="primary" style="display:none">复制 JSON</button>
+    <button id="rawBtn" style="display:none">查看原始返回</button>
+  </div>
+  <pre id="raw" style="display:none"></pre>
+
+  <script>
+    const api = window.pet || {};
+    const view = document.getElementById('view');
+    const copyBtn = document.getElementById('copyBtn');
+    const rawBtn = document.getElementById('rawBtn');
+    const rawEl = document.getElementById('raw');
+    let current = null;
+    let rawText = '';
+
+    const FIELDS = [
+      ['name', '姓名'], ['company', '公司'], ['title', '职位'],
+      ['phone', '电话'], ['email', '邮箱'], ['address', '地址'], ['website', '网址'],
+    ];
+
+    function showLoading() {
+      view.innerHTML = '<div class="state"><div class="spin"></div>正在识别，请稍等…</div>';
+      copyBtn.style.display = 'none';
+      rawBtn.style.display = 'none';
+      rawEl.style.display = 'none';
+    }
+
+    function showError(msg) {
+      view.innerHTML = '';
+      const d = document.createElement('div');
+      d.className = 'state err';
+      d.textContent = msg || '识别失败';
+      view.appendChild(d);
+    }
+
+    function showData(data) {
+      current = data || {};
+      view.innerHTML = '';
+      let any = false;
+      FIELDS.forEach(function (pair) {
+        const key = pair[0], label = pair[1];
+        const val = current[key] == null ? '' : String(current[key]);
+        if (val.trim()) any = true;
+        const row = document.createElement('div');
+        row.className = 'kv';
+        const k = document.createElement('span'); k.className = 'k'; k.textContent = label;
+        const v = document.createElement('span'); v.className = 'v' + (val.trim() ? '' : ' empty');
+        v.textContent = val.trim() || '—';
+        row.appendChild(k); row.appendChild(v);
+        view.appendChild(row);
+      });
+      if (!any) {
+        const d = document.createElement('div');
+        d.className = 'state';
+        d.textContent = '没有抽取到字段，可能是模型不支持图片输入，或图片里没有文字。';
+        view.appendChild(d);
+      }
+      copyBtn.style.display = 'inline-block';
+      rawBtn.style.display = 'inline-block';
+    }
+
+    async function copyText(t) {
+      try {
+        if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(t); return true; }
+      } catch (_) {}
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch (_) { return false; }
+    }
+
+    copyBtn.addEventListener('click', async function () {
+      const ok = await copyText(JSON.stringify(current || {}, null, 2));
+      copyBtn.textContent = ok ? '已复制 ✓' : '复制失败';
+      setTimeout(function () { copyBtn.textContent = '复制 JSON'; }, 1200);
+    });
+    rawBtn.addEventListener('click', function () {
+      rawEl.style.display = rawEl.style.display === 'none' ? 'block' : 'none';
+    });
+
+    if (api.onCardData) {
+      api.onCardData(function (p) {
+        p = p || {};
+        rawText = p.raw || '';
+        rawEl.textContent = rawText;
+        if (p.loading) return showLoading();
+        if (p.error) return showError(p.error);
+        showData(p.data);
+      });
+    }
+  </script>
+</body>
+</html>

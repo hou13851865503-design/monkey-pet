@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>剪贴板历史</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 14px;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: #f6f7fa; color: #20242c;
+      height: 100vh; display: flex; flex-direction: column;
+    }
+    .top { display: flex; gap: 8px; margin-bottom: 10px; }
+    input[type=search] {
+      flex: 1; padding: 9px 11px; border: 1px solid #dfe3ea; border-radius: 10px;
+      font-size: 13px; outline: none; background: #fff;
+    }
+    input[type=search]:focus { border-color: #5b9bff; box-shadow: 0 0 0 3px rgba(91,155,255,.15); }
+    button {
+      padding: 9px 12px; border: 0; border-radius: 10px;
+      background: #e8edf6; color: #33405a; font-size: 13px; cursor: pointer;
+    }
+    button:hover { background: #dbe3f0; }
+    #list { list-style: none; margin: 0; padding: 0; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+    #list li {
+      background: #fff; border: 1px solid #e6e9f0; border-radius: 10px;
+      padding: 9px 11px; font-size: 13px; line-height: 1.4;
+      cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #list li:hover, #list li.sel { border-color: #5b9bff; background: #f0f6ff; }
+    #list li .idx { color: #b3bccb; margin-right: 8px; font-size: 11px; }
+    #list li.empty { cursor: default; color: #9aa2b1; border-style: dashed; }
+    .foot { margin-top: 10px; font-size: 11px; color: #9aa2b1; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <input id="q" type="search" placeholder="搜索剪贴板历史…" />
+    <button id="clearBtn">清空</button>
+  </div>
+  <ul id="list"></ul>
+  <div class="foot">
+    <span>↑↓ 选择 · Enter 复制 · Esc 关闭</span>
+    <span id="count"></span>
+  </div>
+
+  <script>
+    const api = window.pet || {};
+    let items = [];
+    let sel = -1;
+    const listEl = document.getElementById('list');
+    const qEl = document.getElementById('q');
+    const countEl = document.getElementById('count');
+
+    function filtered() {
+      const q = qEl.value.trim().toLowerCase();
+      if (!q) return items.map((t, i) => ({ t, i }));
+      return items.map((t, i) => ({ t, i })).filter((o) => o.t.toLowerCase().includes(q));
+    }
+
+    function render() {
+      const rows = filtered();
+      listEl.innerHTML = '';
+      sel = Math.min(sel, rows.length - 1);
+      countEl.textContent = items.length ? `共 ${items.length} 条` : '';
+      if (!rows.length) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = items.length ? '没有匹配的内容' : '还没有记录，复制点什么试试～';
+        listEl.appendChild(li);
+        return;
+      }
+      rows.forEach((o, k) => {
+        const li = document.createElement('li');
+        li.className = k === sel ? 'sel' : '';
+        const idx = document.createElement('span');
+        idx.className = 'idx';
+        idx.textContent = String(k + 1);
+        li.appendChild(idx);
+        li.appendChild(document.createTextNode(o.t.replace(/\s+/g, ' ')));
+        li.addEventListener('click', () => { api.pickClip && api.pickClip(o.i); });
+        listEl.appendChild(li);
+      });
+    }
+
+    qEl.addEventListener('input', () => { sel = -1; render(); });
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      if (api.clearClip) api.clearClip();
+      items = []; sel = -1; render();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const rows = filtered();
+      if (e.key === 'Escape') { window.close(); return; }
+      if (e.key === 'ArrowDown') { sel = Math.min(rows.length - 1, sel + 1); render(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { sel = Math.max(0, sel - 1); render(); e.preventDefault(); }
+      else if (e.key === 'Enter') {
+        const target = rows[sel >= 0 ? sel : 0];
+        if (target && api.pickClip) api.pickClip(target.i);
+      }
+    });
+
+    (async function () {
+      try { if (api.getClipHistory) items = (await api.getClipHistory()) || []; } catch (_) { items = []; }
+      render();
+      if (api.onClipList) api.onClipList((list) => { items = list || []; render(); });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>小猴气泡</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background: transparent; overflow: hidden;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      -webkit-user-select: none; user-select: none;
+    }
+    #card {
+      position: absolute; left: 8px; right: 8px; top: 8px; bottom: 10px;
+      box-sizing: border-box;
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: rgba(28, 30, 38, 0.94);
+      color: #f2f4f8;
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    #card::after {
+      content: ""; position: absolute; left: 50%; bottom: -6px;
+      width: 13px; height: 13px; border-radius: 3px;
+      background: rgba(28, 30, 38, 0.94);
+      border-right: 1px solid rgba(255, 255, 255, 0.10);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+      transform: translateX(-50%) rotate(45deg);
+    }
+    body.below #card::after {
+      bottom: auto; top: -6px;
+      border-right: none; border-bottom: none;
+      border-left: 1px solid rgba(255, 255, 255, 0.10);
+      border-top: 1px solid rgba(255, 255, 255, 0.10);
+    }
+    #title {
+      flex: 0 0 auto;
+      font-size: 12px; font-weight: 700; letter-spacing: .3px;
+      color: #8fd0ff;
+    }
+    #text {
+      flex: 1; display: flex; align-items: center;
+      font-size: 14px; line-height: 1.45;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    #list {
+      list-style: none; margin: 0; padding: 0;
+      overflow: hidden; flex: 1;
+      display: none; flex-direction: column; gap: 4px;
+    }
+    #list li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.35; }
+    .ck { flex: 0 0 auto; color: #9aa4b2; }
+    .ck.done { color: #5fd18a; }
+    .tx { flex: 1; min-width: 0; word-break: break-word; }
+    .tx.done { color: #8b93a1; text-decoration: line-through; }
+    li.empty { color: #8b93a1; font-size: 12px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div id="card">
+    <div id="title"></div>
+    <div id="text"></div>
+    <ul id="list"></ul>
+  </div>
+  <script>
+    const titleEl = document.getElementById('title');
+    const textEl = document.getElementById('text');
+    const listEl = document.getElementById('list');
+
+    function render(p) {
+      p = p || {};
+      titleEl.textContent = p.title || '';
+      titleEl.style.display = p.title ? 'block' : 'none';
+      document.body.classList.toggle('below', !!p.below);
+
+      if (p.kind === 'list' || p.kind === 'lines') {
+        textEl.style.display = 'none';
+        listEl.style.display = 'flex';
+        listEl.innerHTML = '';
+        const items = Array.isArray(p.items) ? p.items : [];
+        const withCheck = p.kind === 'list';
+        if (!items.length) {
+          const li = document.createElement('li');
+          li.className = 'empty';
+          li.textContent = withCheck
+            ? '今天还没有待办～右键小猴 →「今日待办」去添加吧'
+            : '今天没有课，好好休息～';
+          listEl.appendChild(li);
+        } else {
+          items.forEach((it) => {
+            const li = document.createElement('li');
+            if (withCheck) {
+              const ck = document.createElement('span');
+              ck.className = 'ck' + (it.done ? ' done' : '');
+              ck.textContent = it.done ? '✓' : '○';
+              li.appendChild(ck);
+            }
+            const tx = document.createElement('span');
+            tx.className = 'tx' + (it.done ? ' done' : '');
+            tx.textContent = it.text;
+            li.appendChild(tx);
+            listEl.appendChild(li);
+          });
+        }
+      } else {
+        listEl.style.display = 'none';
+        textEl.style.display = 'flex';
+        textEl.textContent = p.text || '';
+      }
+    }
+
+    if (window.pet && window.pet.onBubble) window.pet.onBubble(render);
+  </script>
+</body>
+</html>

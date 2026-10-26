@@ -1,0 +1,47 @@
+{
+  "name": "monkey-pet",
+  "version": "0.6.0",
+  "description": "桌面小猴宠物 (Electron) — 情绪/事件/吸附/防打扰/番茄钟/待办/剪贴板/系统监控/课程提醒/AI对话/名片识别/TTS/早报",
+  "main": "main.js",
+  "scripts": {
+    "start": "node launcher.js",
+    "dist": "electron-builder"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.monkeypet.app",
+    "productName": "小猴桌宠",
+    "icon": "assets/monkey.ico",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "bubble.html",
+      "todo.html",
+      "clip.html",
+      "schedule.html",
+      "settings.html",
+      "chat.html",
+      "card.html",
+      "usage.html",
+      "launcher.js",
+      "tools/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/monkey.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>今日待办</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: #f6f7fa; color: #20242c;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    .sub { font-size: 12px; color: #7b8494; margin-bottom: 14px; }
+    .add { display: flex; gap: 8px; margin-bottom: 12px; }
+    input {
+      flex: 1; padding: 9px 11px; border: 1px solid #dfe3ea; border-radius: 10px;
+      font-size: 13px; outline: none; background: #fff;
+    }
+    input:focus { border-color: #5b9bff; box-shadow: 0 0 0 3px rgba(91, 155, 255, .15); }
+    button {
+      padding: 9px 14px; border: 0; border-radius: 10px;
+      background: #3b82f6; color: #fff; font-size: 13px; cursor: pointer;
+    }
+    button.ghost { background: #e8edf6; color: #33405a; }
+    #list {
+      list-style: none; margin: 0; padding: 0;
+      display: flex; flex-direction: column; gap: 8px;
+      max-height: 268px; overflow: auto;
+    }
+    #list li {
+      display: flex; align-items: center; gap: 10px;
+      background: #fff; border: 1px solid #e6e9f0; border-radius: 10px; padding: 9px 11px;
+    }
+    #list li .txt { flex: 1; font-size: 13px; word-break: break-word; }
+    #list li.done .txt { color: #9aa2b1; text-decoration: line-through; }
+    #list li input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+    .del { border: 0; background: transparent; color: #c0c6d2; font-size: 16px; cursor: pointer; padding: 0 4px; }
+    .del:hover { color: #e5534b; }
+    .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; gap: 8px; }
+    .tip { font-size: 11px; color: #9aa2b1; }
+  </style>
+</head>
+<body>
+  <h1>今日待办</h1>
+  <div class="sub">小猴气泡会显示今天的清单，勾掉的会划掉</div>
+
+  <div class="add">
+    <input id="inp" placeholder="写一条待办，回车即可添加" maxlength="120" />
+    <button id="addBtn" class="ghost">添加</button>
+  </div>
+
+  <ul id="list"></ul>
+
+  <div class="foot">
+    <span class="tip">每天自动重置勾选状态</span>
+    <button id="saveBtn">保存</button>
+  </div>
+
+  <script>
+    const api = window.pet || {};
+    let items = [];
+    const listEl = document.getElementById('list');
+    const inp = document.getElementById('inp');
+    const saveBtn = document.getElementById('saveBtn');
+
+    function render() {
+      listEl.innerHTML = '';
+      if (!items.length) {
+        const li = document.createElement('li');
+        li.innerHTML = '<span class="txt" style="color:#9aa2b1">还没有待办，先加一条吧</span>';
+        listEl.appendChild(li);
+        return;
+      }
+      items.forEach(function (it, i) {
+        const li = document.createElement('li');
+        if (it.done) li.className = 'done';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!it.done;
+        cb.addEventListener('change', function () { items[i].done = cb.checked; render(); });
+
+        const tx = document.createElement('span');
+        tx.className = 'txt';
+        tx.textContent = it.text;
+
+        const del = document.createElement('button');
+        del.className = 'del';
+        del.textContent = '×';
+        del.addEventListener('click', function () { items.splice(i, 1); render(); });
+
+        li.appendChild(cb);
+        li.appendChild(tx);
+        li.appendChild(del);
+        listEl.appendChild(li);
+      });
+    }
+
+    function add() {
+      const v = inp.value.trim();
+      if (!v) return;
+      items.push({ text: v, done: false });
+      inp.value = '';
+      render();
+    }
+
+    document.getElementById('addBtn').addEventListener('click', add);
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') add(); });
+
+    saveBtn.addEventListener('click', async function () {
+      try {
+        if (api.saveTodos) await api.saveTodos(items);
+        saveBtn.textContent = '已保存 ✓';
+        setTimeout(function () { saveBtn.textContent = '保存'; }, 1200);
+      } catch (_) {}
+    });
+
+    (async function () {
+      try { if (api.getTodos) items = (await api.getTodos()) || []; } catch (_) { items = []; }
+      render();
+    })();
+  </script>
+</body>
+</html>

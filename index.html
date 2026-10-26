@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>小猴桌宠</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #stage {
+      position: absolute; inset: 0;
+      cursor: grab;
+      touch-action: none;   /* 保证指针事件不被浏览器手势打断 */
+    }
+    #stage:active { cursor: grabbing; }
+
+    /* 伪 3D 透视倾斜层（JS 每帧更新 transform） */
+    #tilt { position: absolute; inset: 0; will-change: transform; }
+
+    /* 呼吸动画层 */
+    #breath {
+      position: absolute; inset: 0;
+      transform-origin: center bottom;
+      animation: breathe 3.4s ease-in-out infinite;
+    }
+    @keyframes breathe {
+      0%, 100% { transform: scaleY(1) translateY(0); }
+      50%      { transform: scaleY(0.97) translateY(2px); }
+    }
+
+    /* 所有帧叠在同一位置，靠 opacity 交叉淡入 => 动作连贯 */
+    .f {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain;
+      opacity: 0;
+      transition: opacity .18s ease;
+      pointer-events: none;
+      -webkit-user-drag: none;
+    }
+    .f.active { opacity: 1; }
+
+    /* 点击穿透模式提示 */
+    body.clickthrough #stage { opacity: 0.8; cursor: default; }
+  </style>
+</head>
+<body>
+  <div id="stage"><div id="tilt"><div id="breath"></div></div></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

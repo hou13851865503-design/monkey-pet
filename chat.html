@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>和小猴聊天</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; display: flex; flex-direction: column;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: #f6f7fa; color: #20242c;
+    }
+    header {
+      padding: 10px 14px; background: #fff; border-bottom: 1px solid #e6e9f0;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header .t { font-size: 14px; font-weight: 700; }
+    header .s { font-size: 11px; color: #9aa2b1; }
+    #log { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .msg { max-width: 82%; padding: 9px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    .me { align-self: flex-end; background: #3b82f6; color: #fff; border-bottom-right-radius: 4px; }
+    .bot { align-self: flex-start; background: #fff; border: 1px solid #e6e9f0; border-bottom-left-radius: 4px; }
+    .sys { align-self: center; background: #eef2f8; color: #6b7486; font-size: 12px; }
+    .composer { padding: 10px; background: #fff; border-top: 1px solid #e6e9f0; display: flex; gap: 8px; }
+    #inp {
+      flex: 1; resize: none; height: 44px; max-height: 120px;
+      padding: 10px 12px; border: 1px solid #dfe3ea; border-radius: 10px;
+      font-size: 13px; font-family: inherit; outline: none;
+    }
+    #inp:focus { border-color: #5b9bff; box-shadow: 0 0 0 3px rgba(91,155,255,.15); }
+    button { padding: 0 16px; border: 0; border-radius: 10px; background: #3b82f6; color: #fff; font-size: 13px; cursor: pointer; }
+    button:disabled { background: #b9c6da; cursor: default; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="t">和小猴聊天</span>
+    <span class="s">Enter 发送 · Shift+Enter 换行</span>
+  </header>
+  <div id="log"></div>
+  <div class="composer">
+    <textarea id="inp" placeholder="说点什么…"></textarea>
+    <button id="send">发送</button>
+  </div>
+
+  <script>
+    const api = window.pet || {};
+    const logEl = document.getElementById('log');
+    const inp = document.getElementById('inp');
+    const sendBtn = document.getElementById('send');
+    const history = [];
+    let busy = false;
+
+    function add(cls, text) {
+      const d = document.createElement('div');
+      d.className = 'msg ' + cls;
+      d.textContent = text;
+      logEl.appendChild(d);
+      logEl.scrollTop = logEl.scrollHeight;
+      return d;
+    }
+
+    async function send() {
+      const text = inp.value.trim();
+      if (!text || busy) return;
+      if (!api.chat) { add('sys', '聊天接口不可用'); return; }
+      inp.value = '';
+      add('me', text);
+      history.push({ role: 'user', content: text });
+      busy = true; sendBtn.disabled = true;
+      const pending = add('bot', '…');
+      try {
+        const r = await api.chat([{ role: 'system', content: '你是小猴桌宠，回答简短、可爱、口语化，控制在 80 字以内。' }].concat(history));
+        if (r && r.ok) {
+          pending.textContent = r.text;
+          history.push({ role: 'assistant', content: r.text });
+          if (api.speak) api.speak(r.text);
+        } else {
+          pending.textContent = '出错了：' + ((r && r.error) || '未知错误');
+        }
+      } catch (e) {
+        pending.textContent = '请求异常：' + (e.message || e);
+      }
+      busy = false; sendBtn.disabled = false;
+      logEl.scrollTop = logEl.scrollHeight;
+      inp.focus();
+    }
+
+    sendBtn.addEventListener('click', send);
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    inp.focus();
+  </script>
+</body>
+</html>

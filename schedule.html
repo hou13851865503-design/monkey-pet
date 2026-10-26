@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>课程表 / 日程</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: #f6f7fa; color: #20242c;
+    }
+    h1 { font-size: 16px; margin: 0 0 6px; }
+    .sub { font-size: 12px; color: #7b8494; margin-bottom: 14px; }
+    .num { width: 54px; padding: 4px 6px; border: 1px solid #dfe3ea; border-radius: 8px; font-size: 12px; }
+    .card { background: #fff; border: 1px solid #e6e9f0; border-radius: 12px; padding: 12px; margin-bottom: 14px; }
+    .card-h { font-size: 13px; font-weight: 700; color: #33405a; margin-bottom: 8px; }
+    .rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+    .row {
+      display: flex; align-items: center; gap: 8px;
+      background: #f8f9fc; border: 1px solid #eef1f6; border-radius: 8px;
+      padding: 6px 9px; font-size: 12.5px;
+    }
+    .row .tag { color: #5b9bff; font-weight: 700; flex: 0 0 auto; }
+    .row .nm { flex: 1; min-width: 0; word-break: break-word; }
+    .row .rm { color: #8b93a1; flex: 0 0 auto; }
+    .row .del { border: 0; background: transparent; color: #c0c6d2; font-size: 15px; cursor: pointer; padding: 0 3px; }
+    .row .del:hover { color: #e5534b; }
+    .empty { color: #9aa2b1; font-size: 12px; padding: 4px 2px; }
+    .addrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .addrow input, .addrow select {
+      padding: 7px 9px; border: 1px solid #dfe3ea; border-radius: 8px;
+      font-size: 12.5px; outline: none; background: #fff;
+    }
+    .addrow input[type=time] { width: 108px; }
+    .addrow input[type=date] { width: 140px; }
+    .addrow input.nm { flex: 1; min-width: 120px; }
+    button.primary { padding: 7px 14px; border: 0; border-radius: 8px; background: #3b82f6; color: #fff; font-size: 12.5px; cursor: pointer; }
+    button.ghostb { padding: 7px 12px; border: 0; border-radius: 8px; background: #e8edf6; color: #33405a; font-size: 12.5px; cursor: pointer; }
+    .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .tip { font-size: 11px; color: #9aa2b1; }
+  </style>
+</head>
+<body>
+  <h1>课程表 / 日程</h1>
+  <div class="sub">提前 <input id="adv" class="num" type="number" min="0" max="120" value="10" /> 分钟用小猴气泡提醒你</div>
+
+  <div class="card">
+    <div class="card-h">每周课程（按星期重复）</div>
+    <div id="courseList" class="rows"></div>
+    <div class="addrow">
+      <select id="cDay"></select>
+      <input id="cTime" type="time" value="08:00" />
+      <input id="cName" class="nm" placeholder="课程名" maxlength="40" />
+      <input id="cRoom" placeholder="地点" maxlength="40" style="width:110px" />
+      <button id="cAdd" class="ghostb">添加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">一次性日程</div>
+    <div id="remList" class="rows"></div>
+    <div class="addrow">
+      <input id="rDate" type="date" />
+      <input id="rTime" type="time" value="08:00" />
+      <input id="rName" class="nm" placeholder="日程内容" maxlength="40" />
+      <button id="rAdd" class="ghostb">添加</button>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="tip">每周课程到点前提醒；一次性日程只在那一天提醒</span>
+    <button id="save" class="primary">保存</button>
+  </div>
+
+  <script>
+    const api = window.pet || {};
+    const WEEK = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    let courses = [];
+    let reminders = [];
+
+    const courseList = document.getElementById('courseList');
+    const remList = document.getElementById('remList');
+    const daySel = document.getElementById('cDay');
+
+    WEEK.forEach(function (w, i) {
+      const o = document.createElement('option');
+      o.value = String(i + 1);
+      o.textContent = w;
+      daySel.appendChild(o);
+    });
+
+    function row(parts, onDel) {
+      const div = document.createElement('div');
+      div.className = 'row';
+      parts.forEach(function (p) {
+        const s = document.createElement('span');
+        s.className = p.cls || '';
+        s.textContent = p.text;
+        div.appendChild(s);
+      });
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '×';
+      del.addEventListener('click', onDel);
+      div.appendChild(del);
+      return div;
+    }
+
+    function renderCourses() {
+      courseList.innerHTML = '';
+      if (!courses.length) {
+        const e = document.createElement('div');
+        e.className = 'empty';
+        e.textContent = '还没有课程，下面加一条吧';
+        courseList.appendChild(e);
+        return;
+      }
+      courses.forEach(function (c, i) {
+        const parts = [
+          { text: WEEK[(Number(c.day) || 1) - 1], cls: 'tag' },
+          { text: c.time || '', cls: 'tag' },
+          { text: c.name, cls: 'nm' },
+        ];
+        if (c.room) parts.push({ text: '@ ' + c.room, cls: 'rm' });
+        courseList.appendChild(row(parts, function () { courses.splice(i, 1); renderCourses(); }));
+      });
+    }
+
+    function renderReminders() {
+      remList.innerHTML = '';
+      if (!reminders.length) {
+        const e = document.createElement('div');
+        e.className = 'empty';
+        e.textContent = '还没有一次性日程';
+        remList.appendChild(e);
+        return;
+      }
+      reminders.forEach(function (r, i) {
+        const parts = [
+          { text: r.date, cls: 'tag' },
+          { text: r.time || '', cls: 'tag' },
+          { text: r.name, cls: 'nm' },
+        ];
+        remList.appendChild(row(parts, function () { reminders.splice(i, 1); renderReminders(); }));
+      });
+    }
+
+    document.getElementById('cAdd').addEventListener('click', function () {
+      const name = document.getElementById('cName').value.trim();
+      if (!name) return;
+      courses.push({
+        day: Number(daySel.value),
+        time: document.getElementById('cTime').value || '08:00',
+        name: name,
+        room: document.getElementById('cRoom').value.trim(),
+      });
+      document.getElementById('cName').value = '';
+      document.getElementById('cRoom').value = '';
+      renderCourses();
+    });
+
+    document.getElementById('rAdd').addEventListener('click', function () {
+      const name = document.getElementById('rName').value.trim();
+      const date = document.getElementById('rDate').value;
+      if (!name || !date) return;
+      reminders.push({ date: date, time: document.getElementById('rTime').value || '08:00', name: name });
+      document.getElementById('rName').value = '';
+      renderReminders();
+    });
+
+    const saveBtn = document.getElementById('save');
+    saveBtn.addEventListener('click', async function () {
+      const payload = {
+        courses: courses,
+        reminders: reminders,
+        remindBefore: Number(document.getElementById('adv').value) || 0,
+      };
+      try {
+        if (api.saveSchedule) await api.saveSchedule(payload);
+        saveBtn.textContent = '已保存 ✓';
+        setTimeout(function () { saveBtn.textContent = '保存'; }, 1200);
+      } catch (_) {}
+    });
+
+    (async function () {
+      try {
+        if (api.getSchedule) {
+          const d = (await api.getSchedule()) || {};
+          courses = d.courses || [];
+          reminders = d.reminders || [];
+          document.getElementById('adv').value = (d.remindBefore == null ? 10 : d.remindBefore);
+        }
+      } catch (_) {}
+      const t = new Date();
+      const p = function (n) { return String(n).padStart(2, '0'); };
+      document.getElementById('rDate').value = t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate());
+      renderCourses();
+      renderReminders();
+    })();
+  </script>
+</body>
+</html>

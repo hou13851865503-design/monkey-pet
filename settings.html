@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>AI 设置</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: #f6f7fa; color: #20242c;
+    }
+    h1 { font-size: 16px; margin: 0 0 4px; }
+    .sub { font-size: 12px; color: #7b8494; margin-bottom: 14px; line-height: 1.5; }
+    .card { background: #fff; border: 1px solid #e6e9f0; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    .card-h { font-size: 13px; font-weight: 700; color: #33405a; margin-bottom: 10px; }
+    label { display: block; font-size: 12px; color: #5b667a; margin: 10px 0 5px; }
+    label:first-child { margin-top: 0; }
+    input[type=text], input[type=password], input[type=time], input[type=number] {
+      width: 100%; padding: 9px 11px; border: 1px solid #dfe3ea; border-radius: 9px;
+      font-size: 13px; outline: none; background: #fff;
+    }
+    input:focus { border-color: #5b9bff; box-shadow: 0 0 0 3px rgba(91,155,255,.15); }
+    .row2 { display: flex; gap: 10px; }
+    .row2 > div { flex: 1; }
+    .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #33405a; margin: 10px 0; }
+    .check input { width: 16px; height: 16px; }
+    .foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .btn { padding: 9px 16px; border: 0; border-radius: 9px; font-size: 13px; cursor: pointer; }
+    .btn.primary { background: #3b82f6; color: #fff; }
+    .btn.ghost { background: #e8edf6; color: #33405a; }
+    #status { font-size: 12px; color: #7b8494; margin-top: 10px; min-height: 16px; word-break: break-word; }
+    .hint { font-size: 11px; color: #9aa2b1; margin-top: 6px; line-height: 1.5; }
+    code { background: #eef2f8; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>AI 设置</h1>
+  <div class="sub">用于「AI 对话」和「名片识别」。填任意 <b>OpenAI 兼容</b> 接口即可（OpenAI / 通义 / DeepSeek / 中转站都行）。</div>
+
+  <div class="card">
+    <div class="card-h">接口</div>
+    <label>Base URL</label>
+    <input id="baseUrl" type="text" placeholder="https://api.openai.com/v1" />
+    <label>API Key</label>
+    <input id="apiKey" type="password" placeholder="sk-..." />
+    <label>模型名（需支持图片输入才能识别名片）</label>
+    <input id="model" type="text" placeholder="gpt-4o-mini" />
+    <div class="hint">例：<code>https://api.deepseek.com/v1</code> + <code>deepseek-chat</code>（纯文本对话可用；名片识别要选视觉模型）。</div>
+    <div id="status"></div>
+    <div style="margin-top:10px"><button id="testBtn" class="btn ghost">测试连接</button></div>
+  </div>
+
+  <div class="card">
+    <div class="card-h">早报 & 语音</div>
+    <label>城市（用于天气）</label>
+    <input id="city" type="text" placeholder="南京" />
+    <div class="row2">
+      <div>
+        <label>每日早报时间</label>
+        <input id="reportTime" type="time" value="08:30" />
+      </div>
+    </div>
+    <div class="check"><input id="morningReport" type="checkbox" /><span>开启每日早报（天气 + 一条热点）</span></div>
+    <div class="check"><input id="tts" type="checkbox" /><span>开启语音朗读（用系统 TTS）</span></div>
+  </div>
+
+  <div class="foot">
+    <span class="hint">密钥只保存在本机 settings.json</span>
+    <button id="saveBtn" class="btn primary">保存</button>
+  </div>
+
+  <script>
+    const api = window.pet || {};
+    function $(id) { return document.getElementById(id); }
+
+    async function load() {
+      try {
+        if (!api.getAiSettings) return;
+        const d = (await api.getAiSettings()) || {};
+        const ai = d.ai || {};
+        $('baseUrl').value = ai.baseUrl || 'https://api.openai.com/v1';
+        $('apiKey').value = ai.apiKey || '';
+        $('model').value = ai.model || 'gpt-4o-mini';
+        $('city').value = d.city || '南京';
+        $('reportTime').value = d.reportTime || '08:30';
+        $('morningReport').checked = !!d.morningReport;
+        $('tts').checked = !!d.tts;
+      } catch (_) {}
+    }
+
+    function collect() {
+      return {
+        ai: { baseUrl: $('baseUrl').value.trim(), apiKey: $('apiKey').value.trim(), model: $('model').value.trim() },
+        city: $('city').value.trim(),
+        reportTime: $('reportTime').value || '08:30',
+        morningReport: $('morningReport').checked,
+        tts: $('tts').checked,
+      };
+    }
+
+    $('saveBtn').addEventListener('click', async () => {
+      try {
+        if (api.saveAiSettings) await api.saveAiSettings(collect());
+        $('status').textContent = '已保存 ✓';
+        setTimeout(() => { $('status').textContent = ''; }, 1500);
+      } catch (e) { $('status').textContent = '保存失败'; }
+    });
+
+    $('testBtn').addEventListener('click', async () => {
+      const st = $('status');
+      st.textContent = '先保存再测试…';
+      try {
+        if (api.saveAiSettings) await api.saveAiSettings(collect());
+        st.textContent = '测试中…';
+        const r = await api.chat([{ role: 'user', content: '只回复两个字：收到' }]);
+        st.textContent = r && r.ok ? '连接成功：' + r.text.slice(0, 60) : '连接失败：' + ((r && r.error) || '未知错误');
+      } catch (e) { st.textContent = '测试失败：' + (e.message || e); }
+    });
+
+    load();
+  </script>
+</body>
+</html>

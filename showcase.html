@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>小猴桌宠 · 2D 预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(circle at 50% 30%, #2b3a55 0%, #161c2b 70%, #0d1019 100%);
+      color: #e8edf6; overflow: hidden;
+    }
+    #stage {
+      position: absolute; left: 50%; top: 46%;
+      width: 260px; height: 300px;
+      transform: translate(-50%, -50%);
+      transform-origin: center;
+      cursor: pointer;
+    }
+    .hint { position: absolute; left: 0; right: 0; top: 18px; text-align: center; font-size: 13px; color: #9fb0cc; }
+    .emotions { position: absolute; left: 0; right: 0; bottom: 22px; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 0 12px; }
+    .emotions button { background: rgba(255,255,255,.08); color: #e8edf6; border: 1px solid rgba(255,255,255,.15); border-radius: 999px; padding: 7px 13px; font-size: 13px; cursor: pointer; transition: .15s; }
+    .emotions button:hover { background: rgba(255,255,255,.18); }
+    .tip { position: absolute; left: 0; right: 0; bottom: 70px; text-align: center; font-size: 12px; color: #7e8db0; }
+  </style>
+</head>
+<body>
+  <div class="hint">移动鼠标 → 小猴用头/身体看向光标（永不露背，斜侧帧 + 透视倾斜）</div>
+  <div id="stage"></div>
+  <div class="tip">点击小猴 → 随机正向情绪 ｜ 按住左键 + 滚轮 = 放大缩小 ｜ 下方按钮 = 切换情绪（预览版，无拖拽/托盘）</div>
+  <div class="emotions">
+    <button data-emo="cheer">欢呼</button>
+    <button data-emo="love">爱心</button>
+    <button data-emo="shy">害羞</button>
+    <button data-emo="angry">生气</button>
+    <button data-emo="sad">难过</button>
+    <button data-emo="sleepy">困倦</button>
+    <button data-emo="surprised">惊讶</button>
+    <button data-emo="thinking">思考</button>
+    <button data-emo="wink">眨眼</button>
+    <button id="idle">待机</button>
+  </div>
+
+  <script src="./renderer.js"></script>
+  <script>
+    // 浏览器预览模式：renderer.js 检测到无 window.pet 后会暴露 Monkey2D
+    document.querySelectorAll('.emotions [data-emo]').forEach(b =>
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); window.Monkey2D && window.Monkey2D.setEmotion(b.dataset.emo); }));
+    document.getElementById('idle').addEventListener('click', (ev) => { ev.stopPropagation(); window.Monkey2D && window.Monkey2D.setEmotion('idle'); });
+  </script>
+</body>
+</html>
