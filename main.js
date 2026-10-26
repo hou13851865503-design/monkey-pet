@@ -1119,6 +1119,10 @@ function setClickThrough(on) {
     lastIgnore = !settings.clickThrough;   // 强制下一次 setIgnore 生效
     setIgnore(settings.clickThrough);
     win.webContents.send('clickthrough-state', settings.clickThrough);
+    // 开启后小猴就点不动了，必须明确告诉用户怎么关，否则会以为"坏了"
+    showBubble(settings.clickThrough
+      ? { title: '已开启点击穿透', text: '鼠标会直接穿过小猴。\n再按 Ctrl+Shift+P，或用托盘菜单关闭' }
+      : { title: '已关闭点击穿透', text: '小猴又能拖、能点啦' }, 4500);
   }
   refreshTray();
 }
@@ -1200,6 +1204,7 @@ function registerIpc() {
 
   // 渲染端切帧时上报当前帧 key，供主进程做像素命中判定
   ipcMain.on('frame', (_e, key) => { if (key) currentFrameKey = String(key); });
+  ipcMain.on('debug', (_e, m) => console.log('[renderer] ' + m));
   ipcMain.on('focus-toggle', () => toggleFocus());
   ipcMain.on('open-todo-editor', () => openTodoEditor());
   ipcMain.handle('get-todos', () => todoData());
@@ -1250,6 +1255,33 @@ function shotMode() {
     }
     if (process.env.PET_SHOT_EXIT) app.quit();
   }, 2600);
+}
+
+// 自动化拖拽测试：往页面注入鼠标事件，验证 渲染端手势 -> IPC -> 主进程移动 整条链路
+async function testDrag() {
+  await sleep(1800);
+  if (!win) return;
+  const b0 = win.getBounds();
+  const p = screen.getCursorScreenPoint();
+  // 把窗口挪到光标下面，保证"光标正好在小猴身体中心"
+  win.setPosition(Math.round(p.x - b0.width / 2), Math.round(p.y - b0.height / 2));
+  await sleep(300);
+  const b = win.getBounds();
+  const cx = Math.round(b.width / 2);
+  const cy = Math.round(b.height / 2);
+  console.log('[dragtest] cursor=' + JSON.stringify(p) + ' before=' + JSON.stringify(b) + ' ignore=' + lastIgnore + ' frame=' + currentFrameKey);
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: cx, y: cy, button: 'left', clickCount: 1 });
+  await sleep(160);
+  for (let i = 1; i <= 6; i++) {
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: cx + i * 14, y: cy + i * 9, button: 'left' });
+    await sleep(70);
+  }
+  await sleep(320);
+  console.log('[dragtest] during=' + JSON.stringify(win.getBounds()) + ' isDragging=' + isDragging);
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: cx + 84, y: cy + 54, button: 'left', clickCount: 1 });
+  await sleep(250);
+  console.log('[dragtest] after=' + JSON.stringify(win.getBounds()) + ' isDragging=' + isDragging);
+  if (process.env.PET_TEST_EXIT) app.exit(0);
 }
 
 // ---------- 主窗口 ----------
@@ -1349,6 +1381,13 @@ if (!gotTheLock) {
     // 有托盘就从小任务栏里移除，避免误点任务栏"关闭窗口"把程序关掉
     if (tray) { try { win.setSkipTaskbar(true); } catch (_) {} }
     setInterval(hitTick, 30);   // 像素命中判定：20~33fps 校正一次
+    if (process.env.PET_TEST_DRAG) testDrag();
+    if (settings.clickThrough) {
+      setTimeout(() => showBubble({
+        title: '注意',
+        text: '当前是「点击穿透」模式，小猴不能被点击。\n按 Ctrl+Shift+P 或托盘菜单可关闭',
+      }, 9000), 4000);
+    }
     registerIpc();
     setClickThrough(settings.clickThrough);
     startIdleWatch();

@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('pet', {
 
   // ---------- 当前帧 key（供主进程做像素级命中判定）----------
   setFrame: (key) => ipcRenderer.send('frame', key),
+  debug: (m) => ipcRenderer.send('debug', m),
 
   // ---------- 点击穿透状态 ----------
   onClickThrough: (cb) => ipcRenderer.on('clickthrough-state', (_e, on) => cb(on)),

@@ -178,6 +178,7 @@
   // ---- 拖拽 / 单击 / 双击 / 长按 ----
   let dragging = false, moved = false;
   let downX = 0, downY = 0, clickTimer = null;
+  let downCX = 0, downCY = 0;
   let lpTimer = null, longPressed = false;
 
   function scheduleClick() {
@@ -200,7 +201,9 @@
   stage.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     dragging = true; moved = false; longPressed = false;
+    if (ipc && ipc.debug) ipc.debug('pointerdown');
     downX = e.screenX; downY = e.screenY;
+    downCX = e.clientX; downCY = e.clientY;
     window.addEventListener('mouseup', onWinUp);
     window.addEventListener('blur', onWinUp);
     // 长按 0.65s 且没拖动 => 开始 / 停止专注
@@ -215,10 +218,14 @@
   });
   stage.addEventListener('pointermove', (e) => {
     if (!dragging || moved) return;
-    if (Math.abs(e.screenX - downX) + Math.abs(e.screenY - downY) > 4) {
+    // screenX 在个别环境下不会随移动更新，用 clientX 兜底，两者取大
+    const dScreen = Math.abs(e.screenX - downX) + Math.abs(e.screenY - downY);
+    const dClient = Math.abs(e.clientX - downCX) + Math.abs(e.clientY - downCY);
+    if (Math.max(dScreen, dClient) > 4) {
       moved = true;
       clearTimeout(lpTimer);
       enter('drag');
+      if (ipc && ipc.debug) ipc.debug('moved screen=' + dScreen + ' client=' + dClient);
       if (ipc) ipc.dragStart();
     }
   });
