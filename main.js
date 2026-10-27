@@ -1133,7 +1133,7 @@ function setOpenAtLogin(on) {
     app.setLoginItemSettings({
       openAtLogin: settings.openAtLogin,
       path: app.getPath('exe'),
-      args: process.defaultApp ? [app.getAppPath()] : [],
+      args: process.defaultApp ? [app.getAppPath(), '--no-sandbox'] : ['--no-sandbox'],
     });
   } catch (_) {}
   refreshTray();
@@ -1401,7 +1401,8 @@ if (!gotTheLock) {
       app.setLoginItemSettings({
         openAtLogin: settings.openAtLogin,
         path: app.getPath('exe'),
-        args: process.defaultApp ? [app.getAppPath()] : [],
+        // 本机 Electron 的 GPU 沙箱会崩溃，自启也要带 --no-sandbox，否则开机后起不来
+        args: process.defaultApp ? [app.getAppPath(), '--no-sandbox'] : ['--no-sandbox'],
       });
     } catch (_) {}
     try {
