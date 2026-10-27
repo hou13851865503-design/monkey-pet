@@ -15,9 +15,9 @@ app.whenReady().then(() => {
   const opts = {
     target: path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe'),
     cwd: ROOT,
-    // 注意：Electron 要求「应用路径」在前，Chromium 开关在后；
-    // 开关放在路径前面会报 `bad option: --disable-gpu-sandbox` 直接退出。
-    args: '"' + ROOT + '" --disable-gpu-sandbox',
+    // 只传应用路径。开关必须放在路径之后（放前面会 bad option 直接退出）；
+    // 这里不加任何 Chromium 开关——用户正常桌面环境不需要，加了反而可能崩渲染进程。
+    args: '"' + ROOT + '"',
     description: '小猴桌宠',
     icon: ICON,
     iconIndex: 0,
