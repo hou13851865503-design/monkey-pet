@@ -227,17 +227,22 @@
   // 鼠标偏移 -> 朝向 + 倾斜 + 撸
   function handleCursor(dx, dy) {
     if (state === 'sleepy') enter('idle');
-    // 归一化到 -1..1（约窗口 1.4 倍偏移即到满量程，越远转得越多）
-    const nx = clamp(dx / (Math.max(60, window.innerWidth) * 1.4), -1, 1);
-    const ny = clamp(dy / (Math.max(60, window.innerHeight) * 1.4), -1, 1);
+    // 归一化：以窗口宽/高的 4 倍为满量程，让"正脸"占主导（原来 1.4 倍太灵敏，一动就侧面）
+    const nx = clamp(dx / (Math.max(60, window.innerWidth) * 4), -1, 1);
+    const ny = clamp(dy / (Math.max(60, window.innerHeight) * 4), -1, 1);
 
     // 身体（朝向帧）+ 眼神（随头转动）+ 透视倾斜 一起动
-    tiltTarget.ry = nx * 20;
+    tiltTarget.ry = nx * 12;
     tiltTarget.rx = ny * 14;
     gaze.y = ny * 3;                       // 鼠标偏上 => 整体微升；偏下 => 微沉
 
     if (!focusing) {
-      const k = clamp(Math.round(nx * 2), -2, 2);
+      // 分段阈值：近距离保持正脸，远一点才轻微转，很远才侧面
+      const a = Math.abs(nx);
+      let k = 0;
+      if (a >= 0.8) k = 2;
+      else if (a >= 0.4) k = 1;
+      if (nx < 0) k = -k;
       if (k !== dirK) { dirK = k; showDirection(); }
     }
     rubCheck(dx, dy);

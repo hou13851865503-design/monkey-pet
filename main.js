@@ -1424,7 +1424,8 @@ function createWindow() {
     try { win.reload(); } catch (_) {}   // 页面进程挂掉时自动重载，而不是整只消失
   });
 
-  facingTimer = setInterval(sendCursor, POLL_MS);
+  // 测试朝向时不要用真实光标覆盖注入值
+  if (!process.env.PET_TEST_GAZE) facingTimer = setInterval(sendCursor, POLL_MS);
   if (startHidden) win.hide();
 
   if (process.env.PET_DEBUG) {
@@ -1494,9 +1495,10 @@ if (!gotTheLock) {
             fs.writeFileSync(process.env.PET_TEST_GAZE + '_' + n + '.png', img.toPNG());
           } catch (_) {}
         };
-        win.webContents.send('cursor', 160, 0); await sleep(600); await grab('right');
-        win.webContents.send('cursor', -160, 0); await sleep(600); await grab('left');
-        win.webContents.send('cursor', 0, -160); await sleep(600); await grab('up');
+        win.webContents.send('cursor', 80, 0); await sleep(520); await grab('near');
+        win.webContents.send('cursor', 220, 0); await sleep(520); await grab('mid');
+        win.webContents.send('cursor', 430, 0); await sleep(520); await grab('far');
+        win.webContents.send('cursor', -430, 0); await sleep(520); await grab('farleft');
         console.log('[gaze] captured');
         app.exit(0);
       }, 5200);
