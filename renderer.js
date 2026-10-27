@@ -68,7 +68,7 @@
 
   let state = 'idle';
   let focusing = false;
-  let dirK = 0;          // -2..2，负数=看左（镜像）
+  let dirK = 0;          // -1 看左(镜像) / 0 正面 / 1 看右；只有这两张帧
   let lastCursorAt = 0;  // 最近一次收到光标事件的时间（自主环顾要避让）
   let direction = 0;
   let blinkTimer = null, emotionTimer = null;
@@ -78,22 +78,24 @@
     // 否则鼠标一动就会把正在播的动作帧顶掉，形成来回闪。
     if (state !== 'idle' || isBusy() || focusing) return;
     const k = dirK;
-    // 0 => 正面(01)；±1 => 轻微转向(02)；±2 => 侧面(03)
-    const idx = k === 0 ? 0 : (Math.abs(k) >= 2 ? 2 : 1);
+    // 只用两种朝向：正面(01) / 侧面(03)。02 那张 3/4 帧朝向与 03 不一致，弃用。
     document.body.classList.toggle('faceLeft', k < 0);
-    show('d' + idx);
+    show(k === 0 ? 'd0' : 'd2');
   }
 
-  // 带迟滞的档位判定：越过分界线才换档，避免在边界上反复跳
-  function dirLevel(nx, cur) {
-    const a = Math.abs(nx);
-    const lv = Math.abs(cur);
-    let next = lv;
-    if (lv === 0) { if (a >= 0.70) next = 2; else if (a >= 0.32) next = 1; }
-    else if (lv === 1) { if (a >= 0.70) next = 2; else if (a < 0.24) next = 0; }
-    else { if (a < 0.24) next = 0; else if (a < 0.60) next = 1; }
-    if (next === 0) return 0;
-    return nx < 0 ? -next : next;
+  // 带迟滞的朝向判定：只有"明显偏在侧面"才转侧脸，其余一律正脸。
+  // 条件有两个，必须同时满足 —— ① 横向够远（>SIDE_ON）② 横向明显大于纵向（不只是斜上方/斜下方）。
+  // 这样鼠标在头顶上、脚下、或斜对角时都是正脸，符合"想看见正脸偏多"。
+  const SIDE_ON = 260, SIDE_OFF = 190;
+  function dirFrom(dx, dy, cur) {
+    const ax = Math.abs(dx), ay = Math.abs(dy);
+    const sideways = ax > ay * 1.15;          // 是否"主要偏在侧面"
+    if (cur === 0) {
+      if (ax >= SIDE_ON && sideways) return dx < 0 ? -1 : 1;
+      return 0;
+    }
+    if (ax < SIDE_OFF || !sideways) return 0; // 收窄了才回正，避免边界抖动
+    return dx < 0 ? -1 : 1;
   }
   function enter(s) {
     if (Date.now() < actionUntil) return;   // 抽烟/喝酒期间不让其它状态抢画面
@@ -202,7 +204,7 @@
       // 环顾：临时转向一侧，再回到原来的朝向
       const old = dirK;
       const side = Math.random() < 0.5 ? -1 : 1;
-      dirK = side * (Math.random() < 0.45 ? 2 : 1);
+      dirK = side;   // 只有正脸/侧脸两种帧，环顾就是直接转头
       showDirection();
       setTimeout(() => {
         if (state === 'idle' && !isDizzy()) {
@@ -265,7 +267,7 @@
     gaze.y = ny * 3;                       // 鼠标偏上 => 整体微升；偏下 => 微沉
 
     if (!focusing) {
-      const next = dirLevel(nx, dirK);
+      const next = dirFrom(dx, dy, dirK);
       if (next !== dirK) { dirK = next; showDirection(); }
     }
     rubCheck(dx, dy);

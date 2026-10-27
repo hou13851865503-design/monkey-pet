@@ -1500,9 +1500,9 @@ if (!gotTheLock) {
           } catch (_) {}
         };
         win.webContents.send('cursor', 60, 0); await sleep(520); await grab('near');
-        win.webContents.send('cursor', 120, 0); await sleep(520); await grab('mid');
-        win.webContents.send('cursor', 200, 0); await sleep(520); await grab('far');
-        win.webContents.send('cursor', -200, 0); await sleep(520); await grab('farleft');
+        win.webContents.send('cursor', 300, 300); await sleep(520); await grab('diag');
+        win.webContents.send('cursor', 380, 0); await sleep(520); await grab('right');
+        win.webContents.send('cursor', -380, 0); await sleep(520); await grab('left');
         console.log('[gaze] captured');
         app.exit(0);
       }, 5200);
