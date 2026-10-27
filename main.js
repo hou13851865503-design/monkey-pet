@@ -14,6 +14,8 @@ const WIN_H = 223;
 const POLL_MS = 80;          // 鼠标跟踪轮询
 const DEADZONE = 28;         // 光标贴近中心不更新朝向
 const ZOOM_MIN = 0.5, ZOOM_MAX = 2.5;
+// 拖拽时超过这个速度（像素/秒）持续 ~80ms => 触发眩晕
+const DIZZY_SPEED = 1500;
 
 const SNAP = 16;             // 距屏幕边缘多少 px 判定吸附
 const PEEK = 44;             // 贴边后露出的像素
@@ -189,6 +191,8 @@ function sendCursor() {
 
 // ---------- 拖拽移动 ----------
 let dragPoll = null;
+// 拖拽速度采样（用于眩晕）
+let dragSamplePos = null, dragSampleT = 0, fastTicks = 0, dizzySent = false;
 let grabOffset = { x: 0, y: 0 };
 function startDrag() {
   if (!win) return;
@@ -201,10 +205,30 @@ function startDrag() {
   const p = screen.getCursorScreenPoint();
   grabOffset = { x: p.x - b.x, y: p.y - b.y };
   if (dragPoll) clearInterval(dragPoll);
+  dragSamplePos = { x: p.x, y: p.y };
+  dragSampleT = Date.now();
+  fastTicks = 0;
+  dizzySent = false;
   dragPoll = setInterval(() => {
     if (!win || !isDragging) return;
     const cp = screen.getCursorScreenPoint();
     try { win.setPosition(Math.round(cp.x - grabOffset.x), Math.round(cp.y - grabOffset.y)); } catch (_) {}
+
+    // ---- 甩得太快 => 眩晕 ----
+    const now = Date.now();
+    const dt = Math.max(1, now - dragSampleT);
+    const dist = Math.hypot(cp.x - dragSamplePos.x, cp.y - dragSamplePos.y);
+    const speed = dist * 1000 / dt;
+    dragSamplePos = { x: cp.x, y: cp.y };
+    dragSampleT = now;
+
+    if (speed > DIZZY_SPEED) fastTicks++; else fastTicks = Math.max(0, fastTicks - 2);
+    // 16ms 一档，连续 5 档（约 80ms）都超速才算"甩"
+    if (fastTicks >= 5 && !dizzySent) {
+      dizzySent = true;
+      try { win.webContents.send('emotion', 'dizzy'); } catch (_) {}
+    }
+    if (speed < 500) dizzySent = false;   // 慢下来后可以再次甩晕
   }, 16);
 }
 function endDrag() {
@@ -1431,6 +1455,17 @@ if (!gotTheLock) {
         } catch (e) { console.log('[emo] err ' + e.message); }
         app.exit(0);
       }, 3000);
+    }
+    if (process.env.PET_TEST_DIZZY) {
+      setTimeout(() => { try { win.webContents.send('emotion', 'dizzy'); } catch (_) {} }, 1600);
+      setTimeout(async () => {
+        try {
+          const img = await win.webContents.capturePage();
+          fs.writeFileSync(process.env.PET_TEST_DIZZY, img.toPNG());
+          console.log('[dizzy] captured');
+        } catch (e) { console.log('[dizzy] err ' + e.message); }
+        app.exit(0);
+      }, 2100);
     }
     if (process.env.PET_TEST_MENU) {
       setTimeout(() => openEmotionPicker(), 1800);

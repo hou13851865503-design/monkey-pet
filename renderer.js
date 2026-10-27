@@ -14,6 +14,9 @@
   const breath = document.getElementById('breath');
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
+  // 眩晕状态（快速拖动触发），提前声明避免 enter() 里的 TDZ
+  let dizzyUntil = 0, dizzyTimer = null;
+
   // ---- 素材：8 朝向(d0..d7) + 9 情绪(e_xxx) ----
   const imgs = {};
   function addFrame(key, src) {
@@ -54,6 +57,7 @@
   function enter(s) {
     state = s;
     document.body.classList.toggle('dragging', s === 'drag');
+    if (isDizzy() && s !== 'idle') return;   // 眩晕期间保持晕脸，不被切走
     if (s === 'idle') showDirection();
     else if (s === 'sleepy') show('e_sleepy');
     else if (s === 'drag') show('e_surprised');
@@ -61,14 +65,31 @@
   }
   function triggerEmotion(name, holdMs = 1500) {
     if (state === 'drag') return;
+    if (isDizzy()) return;                 // 眩晕期间不被其它情绪打断
     clearTimeout(emotionTimer);
     enter('emotion');
     show('e_' + name);
     emotionTimer = setTimeout(() => { enter(focusing ? 'focus' : 'idle'); }, holdMs);
   }
+
+  // ---- 眩晕：快速拖动触发，头顶转圈 + 身体摇晃 ----
+  function isDizzy() { return Date.now() < dizzyUntil; }
+  function setDizzy(ms = 2000) {
+    dizzyUntil = Date.now() + ms;
+    document.body.classList.add('dizzy');
+    clearTimeout(emotionTimer);
+    show('e_wink');
+    clearTimeout(dizzyTimer);
+    dizzyTimer = setTimeout(() => {
+      dizzyUntil = 0;
+      document.body.classList.remove('dizzy');
+      enter(focusing ? 'focus' : 'idle');
+    }, ms);
+  }
   function scheduleBlink() {
     const wait = 2200 + Math.random() * 4200;
     blinkTimer = setTimeout(() => {
+      if (isDizzy()) { scheduleBlink(); return; }   // 晕着的时候别眨眼
       if (state === 'idle' && !focusing) {
         show('e_wink');
         setTimeout(() => { if (state === 'idle' && !focusing) showDirection(); }, 130);
@@ -125,6 +146,7 @@
     if (ipc.onEmotion) {
       ipc.onEmotion((n) => {
         if (n === 'idle') enter(focusing ? 'focus' : 'idle');
+        else if (n === 'dizzy') setDizzy(2000);
         else triggerEmotion(n);
       });
     }
