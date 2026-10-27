@@ -196,7 +196,8 @@
   }
   function scheduleMood() {
     clearTimeout(moodTimer);
-    const wait = 9000 + Math.random() * 12000;
+    // 2~5 分钟才换一次状态，避免"一直在动"的烦躁感
+    const wait = 120000 + Math.random() * 180000;
     moodTimer = setTimeout(() => {
       if (autoMood && state === 'idle' && !focusing && !isDizzy() && !document.hidden) pickMood();
       scheduleMood();
@@ -347,6 +348,7 @@
     dragging = true; moved = false; longPressed = false;
     downX = e.screenX; downY = e.screenY;
     downCX = e.clientX; downCY = e.clientY;
+    scheduleMood();   // 每次互动后重新计时，安静 2~5 分钟
     window.addEventListener('mouseup', onWinUp);
     window.addEventListener('blur', onWinUp);
     // 长按 0.65s 且没拖动 => 开始 / 停止专注
