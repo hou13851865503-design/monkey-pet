@@ -15,7 +15,9 @@ app.whenReady().then(() => {
   const opts = {
     target: path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe'),
     cwd: ROOT,
-    args: '--disable-gpu-sandbox "' + ROOT + '"',
+    // 注意：Electron 要求「应用路径」在前，Chromium 开关在后；
+    // 开关放在路径前面会报 `bad option: --disable-gpu-sandbox` 直接退出。
+    args: '"' + ROOT + '" --disable-gpu-sandbox',
     description: '小猴桌宠',
     icon: ICON,
     iconIndex: 0,
