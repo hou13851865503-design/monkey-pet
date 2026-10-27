@@ -1456,6 +1456,21 @@ if (!gotTheLock) {
         app.exit(0);
       }, 3000);
     }
+    if (process.env.PET_TEST_GAZE) {
+      setTimeout(async () => {
+        const grab = async (n) => {
+          try {
+            const img = await win.webContents.capturePage();
+            fs.writeFileSync(process.env.PET_TEST_GAZE + '_' + n + '.png', img.toPNG());
+          } catch (_) {}
+        };
+        win.webContents.send('cursor', 160, 0); await sleep(600); await grab('right');
+        win.webContents.send('cursor', -160, 0); await sleep(600); await grab('left');
+        win.webContents.send('cursor', 0, -160); await sleep(600); await grab('up');
+        console.log('[gaze] captured');
+        app.exit(0);
+      }, 5200);
+    }
     if (process.env.PET_TEST_DIZZY) {
       setTimeout(() => { try { win.webContents.send('emotion', 'dizzy'); } catch (_) {} }, 1600);
       setTimeout(async () => {

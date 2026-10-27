@@ -28,6 +28,26 @@
     imgs[key] = im;
   }
   for (let i = 0; i < 8; i++) addFrame('d' + i, `./assets/${String(i + 1).padStart(2, '0')}.png`);
+
+  // ---- 眩晕眼：在两只眼睛的位置画旋转螺旋（盖住原瞳孔）----
+  function spiralPath(cx, cy, r0, r1, turns, steps) {
+    let d = '';
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const a = t * turns * Math.PI * 2;
+      const r = r0 + (r1 - r0) * t;
+      d += (i ? ' L' : 'M') + (cx + Math.cos(a) * r).toFixed(2) + ' ' + (cy + Math.sin(a) * r).toFixed(2);
+    }
+    return d;
+  }
+  (function buildDizzyEyes() {
+    const els = document.querySelectorAll('.eye');
+    if (!els.length) return;
+    const d = spiralPath(12, 12, 1, 8.4, 2.6, 120);
+    const svg = '<svg viewBox="0 0 24 24"><path d="' + d +
+      '" fill="none" stroke="#2f2116" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    els.forEach((el) => { el.innerHTML = svg; });
+  })();
   ['angry', 'cheer', 'love', 'sad', 'shy', 'sleepy', 'surprised', 'thinking', 'wink']
     .forEach((n) => addFrame('e_' + n, `./assets/emotion_${n}.png`));
 
@@ -41,22 +61,28 @@
     try { if (window.pet && window.pet.setFrame) window.pet.setFrame(key); } catch (_) {}
   }
 
-  // 朝向帧映射：k∈[-2,2] => 帧序号（禁用 04/05/06 背面帧）
-  const K2D = { '-2': 6, '-1': 7, '0': 0, '1': 1, '2': 2 };
+  // 朝向：素材只有"正面/轻微右转/右侧面"，没有左向帧（04/05/06 是背面）。
+  // 左向 = 把右向帧水平镜像，身体和眼神一起翻，效果自然。
   const POSITIVE = ['cheer', 'love', 'shy'];
 
   let state = 'idle';
   let focusing = false;
+  let dirK = 0;          // -2..2，负数=看左（镜像）
   let direction = 0;
   let blinkTimer = null, emotionTimer = null;
 
   function showDirection() {
     if (state === 'emotion' || state === 'drag' || state === 'focus' || state === 'sleepy') return;
-    show('d' + direction);
+    const k = dirK;
+    // 0 => 正面(01)；±1 => 轻微转向(02)；±2 => 侧面(03)
+    const idx = k === 0 ? 0 : (Math.abs(k) >= 2 ? 2 : 1);
+    document.body.classList.toggle('faceLeft', k < 0);
+    show('d' + idx);
   }
   function enter(s) {
     state = s;
     document.body.classList.toggle('dragging', s === 'drag');
+    if (s !== 'idle') document.body.classList.remove('faceLeft');  // 情绪/拖拽帧不镜像
     if (isDizzy() && s !== 'idle') return;   // 眩晕期间保持晕脸，不被切走
     if (s === 'idle') showDirection();
     else if (s === 'sleepy') show('e_sleepy');
@@ -77,8 +103,9 @@
   function setDizzy(ms = 2000) {
     dizzyUntil = Date.now() + ms;
     document.body.classList.add('dizzy');
+    document.body.classList.remove('faceLeft');   // 眩晕用正面帧，别镜像
     clearTimeout(emotionTimer);
-    show('e_wink');
+    show('d0');                    // 正面睁眼帧，和眼白/螺旋的位置对齐
     clearTimeout(dizzyTimer);
     dizzyTimer = setTimeout(() => {
       dizzyUntil = 0;
@@ -98,9 +125,10 @@
     }, wait);
   }
 
-  // 平滑倾斜
+  // 平滑倾斜 + 上下位移（看向上方/下方时整体轻微上移/下沉）
   const tiltTarget = { rx: 0, ry: 0 };
   const tiltCur = { rx: 0, ry: 0 };
+  const gaze = { y: 0 };
 
   // ---- 撸它：鼠标在身上快速左右来回 => 害羞/喜欢 ----
   let revs = [], lastSign = 0, lastRub = 0;
@@ -121,13 +149,18 @@
   // 鼠标偏移 -> 朝向 + 倾斜 + 撸
   function handleCursor(dx, dy) {
     if (state === 'sleepy') enter('idle');
-    tiltTarget.ry = clamp(dx * 0.09, -16, 16);
-    tiltTarget.rx = clamp(dy * 0.06, -10, 10);
+    // 归一化到 -1..1（约窗口 1.4 倍偏移即到满量程，越远转得越多）
+    const nx = clamp(dx / (Math.max(60, window.innerWidth) * 1.4), -1, 1);
+    const ny = clamp(dy / (Math.max(60, window.innerHeight) * 1.4), -1, 1);
+
+    // 身体（朝向帧）+ 眼神（随头转动）+ 透视倾斜 一起动
+    tiltTarget.ry = nx * 20;
+    tiltTarget.rx = ny * 14;
+    gaze.y = ny * 3;                       // 鼠标偏上 => 整体微升；偏下 => 微沉
+
     if (!focusing) {
-      const deg = Math.atan2(dx, 140) * 180 / Math.PI;
-      const k = clamp(Math.round(deg / 45), -2, 2);
-      const idx = K2D[k];
-      if (idx !== direction) { direction = idx; showDirection(); }
+      const k = clamp(Math.round(nx * 2), -2, 2);
+      if (k !== dirK) { dirK = k; showDirection(); }
     }
     rubCheck(dx, dy);
   }
@@ -190,7 +223,7 @@
     requestAnimationFrame(tiltLoop);
     tiltCur.rx += (tiltTarget.rx - tiltCur.rx) * 0.15;
     tiltCur.ry += (tiltTarget.ry - tiltCur.ry) * 0.15;
-    tilt.style.transform = `perspective(700px) rotateY(${tiltCur.ry}deg) rotateX(${tiltCur.rx}deg)`;
+    tilt.style.transform = `perspective(700px) rotateY(${tiltCur.ry}deg) rotateX(${tiltCur.rx}deg) translateY(${gaze.y}px)`;
   })();
 
   // ---- 透明区域不挡鼠标 ----

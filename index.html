@@ -50,6 +50,9 @@
     }
     .f.active { opacity: 1; }
 
+    /* 看向左侧：把右向帧水平镜像（素材没有左向帧） */
+    body.faceLeft .f { transform: scaleX(-1); }
+
     /* 点击穿透模式提示 */
     body.clickthrough #stage { opacity: 0.8; cursor: default; }
 
@@ -74,6 +77,28 @@
       50%      { transform: rotate(5deg)  translateX(2%); }
     }
     body.dizzy #breath { animation: dizzyWobble .42s ease-in-out infinite; }
+
+    /* ---- 眩晕眼：白色眼白 + 旋转螺旋，盖住原本的瞳孔 ---- */
+    #eyes {
+      position: absolute; inset: 0;
+      z-index: 4;
+      opacity: 0;
+      transition: opacity .14s ease;
+      pointer-events: none;
+    }
+    body.dizzy #eyes { opacity: 1; }
+    .eye {
+      position: absolute;
+      width: 10.8%;
+      aspect-ratio: 1 / 1;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: #fbf7ef;
+      box-shadow: inset 0 0 0 1px rgba(96, 64, 34, .35), 0 1px 2px rgba(0, 0, 0, .18);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .eye svg { width: 90%; height: 90%; animation: dizzySpin .9s linear infinite; }
   </style>
 </head>
 <body>
@@ -85,7 +110,12 @@
         <circle cx="32" cy="32" r="2.6" fill="#ffd54a"/>
       </svg>
     </div>
-    <div id="tilt"><div id="breath"></div></div>
+    <div id="tilt"><div id="breath">
+      <div id="eyes">
+        <i class="eye" style="left:44.86%; top:47.43%"></i>
+        <i class="eye" style="left:66.31%; top:47.47%"></i>
+      </div>
+    </div></div>
   </div>
   <script src="renderer.js"></script>
 </body>
