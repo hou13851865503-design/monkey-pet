@@ -15,9 +15,10 @@ app.whenReady().then(() => {
   const opts = {
     target: path.join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe'),
     cwd: ROOT,
-    // 只传应用路径。开关必须放在路径之后（放前面会 bad option 直接退出）；
-    // 这里不加任何 Chromium 开关——用户正常桌面环境不需要，加了反而可能崩渲染进程。
-    args: '"' + ROOT + '"',
+    // 应用路径在前，开关在后（顺序不能反，否则 electron 报 bad option 直接退出）。
+    // --no-sandbox：这台机器上 Electron 的 GPU 沙箱会让进程 0xC0000005 崩溃，
+    // 加上它才能稳定运行（本地自用的小工具，可接受）。
+    args: '"' + ROOT + '" --no-sandbox',
     description: '小猴桌宠',
     icon: ICON,
     iconIndex: 0,
