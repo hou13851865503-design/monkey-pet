@@ -1481,6 +1481,7 @@ if (!gotTheLock) {
     }
     if (process.env.PET_TEST_ACTION) {
       setTimeout(() => { try { win.webContents.send('do-action', process.env.PET_TEST_ACTION); } catch (_) {} }, 1600);
+      setTimeout(() => { try { win.webContents.send('cursor', 320, 0); } catch (_) {} }, 2000);
       setTimeout(async () => {
         try {
           const img = await win.webContents.capturePage();
@@ -1498,10 +1499,10 @@ if (!gotTheLock) {
             fs.writeFileSync(process.env.PET_TEST_GAZE + '_' + n + '.png', img.toPNG());
           } catch (_) {}
         };
-        win.webContents.send('cursor', 80, 0); await sleep(520); await grab('near');
-        win.webContents.send('cursor', 220, 0); await sleep(520); await grab('mid');
-        win.webContents.send('cursor', 430, 0); await sleep(520); await grab('far');
-        win.webContents.send('cursor', -430, 0); await sleep(520); await grab('farleft');
+        win.webContents.send('cursor', 60, 0); await sleep(520); await grab('near');
+        win.webContents.send('cursor', 120, 0); await sleep(520); await grab('mid');
+        win.webContents.send('cursor', 200, 0); await sleep(520); await grab('far');
+        win.webContents.send('cursor', -200, 0); await sleep(520); await grab('farleft');
         console.log('[gaze] captured');
         app.exit(0);
       }, 5200);

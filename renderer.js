@@ -69,16 +69,31 @@
   let state = 'idle';
   let focusing = false;
   let dirK = 0;          // -2..2，负数=看左（镜像）
+  let lastCursorAt = 0;  // 最近一次收到光标事件的时间（自主环顾要避让）
   let direction = 0;
   let blinkTimer = null, emotionTimer = null;
 
   function showDirection() {
-    if (state === 'emotion' || state === 'drag' || state === 'focus' || state === 'sleepy') return;
+    // 只有真正空闲时才换朝向帧：动作/情绪/拖拽/眩晕/专注期间一律让路，
+    // 否则鼠标一动就会把正在播的动作帧顶掉，形成来回闪。
+    if (state !== 'idle' || isBusy() || focusing) return;
     const k = dirK;
     // 0 => 正面(01)；±1 => 轻微转向(02)；±2 => 侧面(03)
     const idx = k === 0 ? 0 : (Math.abs(k) >= 2 ? 2 : 1);
     document.body.classList.toggle('faceLeft', k < 0);
     show('d' + idx);
+  }
+
+  // 带迟滞的档位判定：越过分界线才换档，避免在边界上反复跳
+  function dirLevel(nx, cur) {
+    const a = Math.abs(nx);
+    const lv = Math.abs(cur);
+    let next = lv;
+    if (lv === 0) { if (a >= 0.70) next = 2; else if (a >= 0.32) next = 1; }
+    else if (lv === 1) { if (a >= 0.70) next = 2; else if (a < 0.24) next = 0; }
+    else { if (a < 0.24) next = 0; else if (a < 0.60) next = 1; }
+    if (next === 0) return 0;
+    return nx < 0 ? -next : next;
   }
   function enter(s) {
     if (Date.now() < actionUntil) return;   // 抽烟/喝酒期间不让其它状态抢画面
@@ -181,7 +196,9 @@
   function pickMood() {
     const r = Math.random();
     if (ipc && ipc.debug) ipc.debug('mood r=' + r.toFixed(2));
-    if (r < 0.5) {
+    // 鼠标刚动过就别自己"环顾"，否则会和跟随鼠标的朝向打架
+    const canLook = Date.now() - lastCursorAt > 4000;
+    if (canLook && r < 0.5) {
       // 环顾：临时转向一侧，再回到原来的朝向
       const old = dirK;
       const side = Math.random() < 0.5 ? -1 : 1;
@@ -237,23 +254,19 @@
   // 鼠标偏移 -> 朝向 + 倾斜 + 撸
   function handleCursor(dx, dy) {
     if (state === 'sleepy') enter('idle');
-    // 归一化：以窗口宽/高的 4 倍为满量程，让"正脸"占主导（原来 1.4 倍太灵敏，一动就侧面）
-    const nx = clamp(dx / (Math.max(60, window.innerWidth) * 4), -1, 1);
-    const ny = clamp(dy / (Math.max(60, window.innerHeight) * 4), -1, 1);
+    lastCursorAt = Date.now();
+    // 满量程 = 窗口宽/高的 2.4 倍（约 260px）：近处正脸、稍远微转、很远才侧面
+    const nx = clamp(dx / (Math.max(60, window.innerWidth) * 2.4), -1, 1);
+    const ny = clamp(dy / (Math.max(60, window.innerHeight) * 2.4), -1, 1);
 
     // 身体（朝向帧）+ 眼神（随头转动）+ 透视倾斜 一起动
-    tiltTarget.ry = nx * 12;
+    tiltTarget.ry = nx * 14;
     tiltTarget.rx = ny * 14;
     gaze.y = ny * 3;                       // 鼠标偏上 => 整体微升；偏下 => 微沉
 
     if (!focusing) {
-      // 分段阈值：近距离保持正脸，远一点才轻微转，很远才侧面
-      const a = Math.abs(nx);
-      let k = 0;
-      if (a >= 0.8) k = 2;
-      else if (a >= 0.4) k = 1;
-      if (nx < 0) k = -k;
-      if (k !== dirK) { dirK = k; showDirection(); }
+      const next = dirLevel(nx, dirK);
+      if (next !== dirK) { dirK = next; showDirection(); }
     }
     rubCheck(dx, dy);
   }
