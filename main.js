@@ -161,7 +161,7 @@ function hitTick() {
 
 // ---------- 光标下发 + 贴边探出检测 ----------
 let lastCursorX = null, lastCursorY = null;
-function sendCursor() {
+function sendCursor(force) {
   if (!win || win.isDestroyed() || isDragging) return;
   const b = win.getBounds();
   const p = screen.getCursorScreenPoint();
@@ -182,7 +182,7 @@ function sendCursor() {
     }
   }
 
-  if (!moved) return;
+  if (!moved && !force) return;
   if (!win.isVisible()) return;
   const dx = p.x - (b.x + b.width / 2);
   const dy = p.y - (b.y + b.height / 2);
@@ -241,6 +241,8 @@ function endDrag() {
   snapToEdge();
   const nb = win.getBounds();
   if (Number.isFinite(nb.x) && Number.isFinite(nb.y)) { settings.pos = { x: nb.x, y: nb.y }; saveSettings(); }
+  // 拖完窗口换了位置：按"当前真实光标"重算朝向，避免停在拖拽时的侧面
+  sendCursor(true);
 }
 
 // ---------- 边缘吸附 + 贴边半隐藏 ----------
@@ -1277,6 +1279,7 @@ function registerIpc() {
   });
   ipcMain.on('show-context-menu', () => petContextMenu());
   ipcMain.on('show-emotion-menu', () => openEmotionPicker());
+  ipcMain.on('refresh-facing', () => sendCursor(true));
   ipcMain.on('pick-emotion', (_e, name) => { if (name) emitEmotion(String(name)); closeEmotionPicker(); });
   ipcMain.on('close-emotion', () => closeEmotionPicker());
 

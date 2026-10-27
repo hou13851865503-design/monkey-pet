@@ -86,7 +86,11 @@
     document.body.classList.toggle('dragging', s === 'drag');
     if (s !== 'idle') document.body.classList.remove('faceLeft');  // 情绪/拖拽帧不镜像
     if (isDizzy() && s !== 'idle') return;   // 眩晕期间保持晕脸，不被切走
-    if (s === 'idle') showDirection();
+    if (s === 'idle') {
+      showDirection();
+      // 让主进程按"当前真实光标"重算一次，避免沿用过期朝向（鼠标停着不动时尤其明显）
+      try { if (window.pet && window.pet.refreshFacing) window.pet.refreshFacing(); } catch (_) {}
+    }
     else if (s === 'sleepy') show('e_sleepy');
     else if (s === 'drag') show('e_surprised');
     else if (s === 'focus') show('e_thinking');
@@ -184,7 +188,12 @@
       dirK = side * (Math.random() < 0.45 ? 2 : 1);
       showDirection();
       setTimeout(() => {
-        if (state === 'idle' && !isDizzy()) { dirK = old; showDirection(); }
+        if (state === 'idle' && !isDizzy()) {
+          try {
+            if (window.pet && window.pet.refreshFacing) window.pet.refreshFacing();
+            else { dirK = old; showDirection(); }
+          } catch (_) { dirK = old; showDirection(); }
+        }
       }, 1100 + Math.random() * 900);
     } else if (r < 0.88) {
       const list = ['cheer', 'love', 'thinking', 'shy', 'surprised'];

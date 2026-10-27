@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('pet', {
   // ---------- 事件反应系统：系统闲置 -> 睡 / 醒 ----------
   onIdle: (cb) => ipcRenderer.on('idle-state', (_e, asleep) => cb(asleep)),
 
+  // ---------- 朝向：让主进程按当前光标立刻重算 ----------
+  refreshFacing: () => ipcRenderer.send('refresh-facing'),
+
   // ---------- 抽烟 / 喝酒 ----------
   onAction: (cb) => ipcRenderer.on('do-action', (_e, type) => cb(type)),
 
