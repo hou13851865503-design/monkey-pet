@@ -201,7 +201,6 @@
   stage.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     dragging = true; moved = false; longPressed = false;
-    if (ipc && ipc.debug) ipc.debug('pointerdown');
     downX = e.screenX; downY = e.screenY;
     downCX = e.clientX; downCY = e.clientY;
     window.addEventListener('mouseup', onWinUp);
@@ -225,7 +224,6 @@
       moved = true;
       clearTimeout(lpTimer);
       enter('drag');
-      if (ipc && ipc.debug) ipc.debug('moved screen=' + dScreen + ' client=' + dClient);
       if (ipc) ipc.dragStart();
     }
   });

@@ -1100,9 +1100,45 @@ const EMOTIONS = [
 function emitEmotion(name) {
   if (win) { try { win.webContents.send('emotion', name); } catch (_) {} }
 }
-function emotionMenu() {
-  if (!win) return;
-  Menu.buildFromTemplate(EMOTIONS.map(([n, label]) => ({ label, click: () => emitEmotion(n) }))).popup(win);
+
+// 自绘表情面板（原生 Menu 在这台机器上收不到点击，改为 HTML 窗口，点击更可靠）
+let emotionWin = null;
+function closeEmotionPicker() {
+  if (emotionWin && !emotionWin.isDestroyed()) {
+    try { emotionWin.close(); } catch (_) {}
+  }
+  emotionWin = null;
+}
+function openEmotionPicker() {
+  if (!win || win.isDestroyed()) return;
+  if (emotionWin && !emotionWin.isDestroyed()) { closeEmotionPicker(); return; }
+
+  const b = win.getBounds();
+  const W = 214, H = 236;
+  const wa = screen.getDisplayMatching(b).workArea;
+  let x = b.x + b.width + 8;
+  if (x + W > wa.x + wa.width) x = b.x - W - 8;
+  x = clamp(x, wa.x + 4, wa.x + wa.width - W - 4);
+  const y = clamp(b.y + Math.round(b.height / 2) - Math.round(H / 2), wa.y + 4, wa.y + wa.height - H - 4);
+
+  emotionWin = new BrowserWindow({
+    x, y, width: W, height: H,
+    frame: false, transparent: true, resizable: false, hasShadow: false,
+    skipTaskbar: true, alwaysOnTop: true, backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  emotionWin.setAlwaysOnTop(true, 'pop-up-menu');
+  emotionWin.loadFile('emotion.html');
+
+  // 刚创建时可能先触发一次 blur，400ms 后才允许"点外面关闭"
+  let armed = false;
+  setTimeout(() => { armed = true; }, 400);
+  emotionWin.on('blur', () => { if (armed) closeEmotionPicker(); });
+  emotionWin.on('closed', () => { emotionWin = null; });
 }
 
 // ---------- 行为开关 ----------
@@ -1200,7 +1236,9 @@ function registerIpc() {
     win.webContents.send('zoom-state', nz);
   });
   ipcMain.on('show-context-menu', () => petContextMenu());
-  ipcMain.on('show-emotion-menu', () => emotionMenu());
+  ipcMain.on('show-emotion-menu', () => openEmotionPicker());
+  ipcMain.on('pick-emotion', (_e, name) => { if (name) emitEmotion(String(name)); closeEmotionPicker(); });
+  ipcMain.on('close-emotion', () => closeEmotionPicker());
 
   // 渲染端切帧时上报当前帧 key，供主进程做像素命中判定
   ipcMain.on('frame', (_e, key) => { if (key) currentFrameKey = String(key); });
@@ -1383,6 +1421,30 @@ if (!gotTheLock) {
     if (tray) { try { win.setSkipTaskbar(true); } catch (_) {} }
     setInterval(hitTick, 30);   // 像素命中判定：20~33fps 校正一次
     if (process.env.PET_TEST_DRAG) testDrag();
+    if (process.env.PET_TEST_EMOTION) {
+      setTimeout(() => emitEmotion('angry'), 2200);
+      setTimeout(async () => {
+        try {
+          const img = await win.webContents.capturePage();
+          fs.writeFileSync(process.env.PET_TEST_EMOTION, img.toPNG());
+          console.log('[emo] captured ' + process.env.PET_TEST_EMOTION);
+        } catch (e) { console.log('[emo] err ' + e.message); }
+        app.exit(0);
+      }, 3000);
+    }
+    if (process.env.PET_TEST_MENU) {
+      setTimeout(() => openEmotionPicker(), 1800);
+      setTimeout(async () => {
+        try {
+          if (emotionWin && !emotionWin.isDestroyed()) {
+            const img = await emotionWin.webContents.capturePage();
+            fs.writeFileSync(process.env.PET_TEST_MENU, img.toPNG());
+            console.log('[menu] captured');
+          } else { console.log('[menu] no window'); }
+        } catch (e) { console.log('[menu] err ' + e.message); }
+        app.exit(0);
+      }, 3000);
+    }
     if (settings.clickThrough) {
       setTimeout(() => showBubble({
         title: '注意',

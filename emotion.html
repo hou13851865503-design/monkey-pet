@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>表情</title>
+<style>
+  * { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  .card {
+    margin: 4px; padding: 8px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    background: rgba(28, 30, 36, .92);
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 14px;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, .38);
+    font: 13px/1.2 "Microsoft YaHei", system-ui, sans-serif;
+  }
+  button {
+    height: 46px; border: 0; border-radius: 9px; cursor: pointer;
+    background: rgba(255, 255, 255, .08); color: #f2f4f8;
+    font: inherit; transition: background .15s, transform .08s;
+  }
+  button:hover { background: rgba(255, 255, 255, .18); }
+  button:active { transform: scale(.96); }
+</style>
+</head>
+<body>
+  <div class="card" id="grid"></div>
+  <script>
+    const LIST = [
+      ['angry', '生气'], ['cheer', '开心'], ['love', '喜欢'],
+      ['sad', '难过'], ['shy', '害羞'], ['sleepy', '困了'],
+      ['surprised', '惊讶'], ['thinking', '思考'], ['wink', '眨眼'],
+    ];
+    const grid = document.getElementById('grid');
+    LIST.forEach(([key, label]) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        if (window.pet && window.pet.pickEmotion) window.pet.pickEmotion(key);
+      });
+      grid.appendChild(b);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && window.pet && window.pet.closeEmotion) window.pet.closeEmotion();
+    });
+  </script>
+</body>
+</html>

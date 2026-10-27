@@ -35,8 +35,11 @@ contextBridge.exposeInMainWorld('pet', {
   // 按住小猴（长按）切换专注
   focusToggle: () => ipcRenderer.send('focus-toggle'),
 
-  // ---------- 双击 -> 情绪菜单 ----------
+  // ---------- 双击 -> 表情面板 ----------
   showEmotionMenu: () => ipcRenderer.send('show-emotion-menu'),
+  // 表情面板里点了某个情绪 / 关闭面板
+  pickEmotion: (name) => ipcRenderer.send('pick-emotion', name),
+  closeEmotion: () => ipcRenderer.send('close-emotion'),
 
   // ---------- 气泡窗口接收内容 ----------
   onBubble: (cb) => ipcRenderer.on('bubble', (_e, payload) => cb(payload)),
