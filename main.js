@@ -38,6 +38,7 @@ const settings = {
   ai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
   city: '南京',
   tts: false,           // 是否语音朗读
+  autoMood: true,       // 空闲时自己换状态（环顾/换表情/小跳）
   morningReport: true,  // 每日早报
   reportTime: '08:30',
   lastReportDate: '',
@@ -1186,8 +1187,14 @@ function setClickThrough(on) {
   }
   refreshTray();
 }
-function setOpenAtLogin(on) {
-  settings.openAtLogin = !!on;
+// 空闲自主状态（环顾 / 换表情 / 小跳）
+function setAutoMood(on) {
+  settings.autoMood = !!on;
+  saveSettings();
+  if (win) { try { win.webContents.send('auto-mood', settings.autoMood); } catch (_) {} }
+  refreshTray();
+}
+function setOpenAtLogin(on) {  settings.openAtLogin = !!on;
   saveSettings();
   try {
     app.setLoginItemSettings({
@@ -1227,6 +1234,7 @@ function menuTemplate() {
   t.push({ label: '点击穿透（鼠标可穿过小猴）', type: 'checkbox', checked: !!settings.clickThrough, click: () => setClickThrough(!settings.clickThrough) });
   t.push({ label: '防打扰（全屏时自动隐藏）', type: 'checkbox', checked: !!settings.antiDisturb, click: () => setAntiDisturb(!settings.antiDisturb) });
   t.push({ label: '开机自启', type: 'checkbox', checked: !!settings.openAtLogin, click: () => setOpenAtLogin(!settings.openAtLogin) });
+  t.push({ label: '自动表情（空闲时自己换状态）', type: 'checkbox', checked: settings.autoMood !== false, click: () => setAutoMood(!(settings.autoMood !== false)) });
   t.push({ type: 'separator' });
   t.push({ label: '功能说明 / 快捷键', click: openUsage });
   t.push({ label: '退出', click: quitApp });
@@ -1368,6 +1376,9 @@ function createWindow() {
   });
 
   const startHidden = process.argv.includes('--hidden');
+  win.webContents.on('did-finish-load', () => {
+    try { win.webContents.send('auto-mood', settings.autoMood !== false); } catch (_) {}
+  });
   win.loadFile('index.html');
   win.setAlwaysOnTop(true, 'pop-up-menu');
 

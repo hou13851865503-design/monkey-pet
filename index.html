@@ -78,6 +78,15 @@
     }
     body.dizzy #breath { animation: dizzyWobble .42s ease-in-out infinite; }
 
+    /* 空闲时偶尔小跳一下 */
+    @keyframes hopUp {
+      0%, 100% { transform: translateY(0) scale(1, 1); }
+      22%      { transform: translateY(-13%) scale(.97, 1.04); }
+      55%      { transform: translateY(0) scale(1.03, .97); }
+      72%      { transform: translateY(-5%) scale(1, 1); }
+    }
+    body.hop #breath { animation: hopUp .62s ease-out; }
+
     /* ---- 眩晕眼：白色眼白 + 旋转螺旋，盖住原本的瞳孔 ---- */
     #eyes {
       position: absolute; inset: 0;

@@ -125,6 +125,38 @@
     }, wait);
   }
 
+  // ---- 空闲自主状态：每隔 9~21 秒自己搞点事（环顾 / 换表情 / 小跳）----
+  let autoMood = true;
+  let moodTimer = null;
+  function pickMood() {
+    const r = Math.random();
+    if (ipc && ipc.debug) ipc.debug('mood r=' + r.toFixed(2));
+    if (r < 0.5) {
+      // 环顾：临时转向一侧，再回到原来的朝向
+      const old = dirK;
+      const side = Math.random() < 0.5 ? -1 : 1;
+      dirK = side * (Math.random() < 0.45 ? 2 : 1);
+      showDirection();
+      setTimeout(() => {
+        if (state === 'idle' && !isDizzy()) { dirK = old; showDirection(); }
+      }, 1100 + Math.random() * 900);
+    } else if (r < 0.88) {
+      const list = ['cheer', 'love', 'thinking', 'shy', 'surprised'];
+      triggerEmotion(list[Math.floor(Math.random() * list.length)], 1400 + Math.random() * 700);
+    } else {
+      document.body.classList.add('hop');
+      setTimeout(() => document.body.classList.remove('hop'), 650);
+    }
+  }
+  function scheduleMood() {
+    clearTimeout(moodTimer);
+    const wait = 9000 + Math.random() * 12000;
+    moodTimer = setTimeout(() => {
+      if (autoMood && state === 'idle' && !focusing && !isDizzy() && !document.hidden) pickMood();
+      scheduleMood();
+    }, wait);
+  }
+
   // 平滑倾斜 + 上下位移（看向上方/下方时整体轻微上移/下沉）
   const tiltTarget = { rx: 0, ry: 0 };
   const tiltCur = { rx: 0, ry: 0 };
@@ -175,6 +207,9 @@
         if (asleep) { if (state !== 'drag') enter('sleepy'); }
         else if (state === 'sleepy') enter('idle');
       });
+    }
+    if (ipc.onAutoMood) {
+      ipc.onAutoMood((on) => { autoMood = !!on; });
     }
     if (ipc.onEmotion) {
       ipc.onEmotion((n) => {
@@ -332,4 +367,5 @@
 
   enter('idle');
   scheduleBlink();
+  scheduleMood();
 })();
