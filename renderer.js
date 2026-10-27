@@ -14,8 +14,9 @@
   const breath = document.getElementById('breath');
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-  // 眩晕状态（快速拖动触发），提前声明避免 enter() 里的 TDZ
+  // 眩晕 / 喝酒抽烟等"正在做动作"的状态，提前声明避免 enter() 里的 TDZ
   let dizzyUntil = 0, dizzyTimer = null;
+  let actionUntil = 0, actionTimer = null;
 
   // ---- 素材：8 朝向(d0..d7) + 9 情绪(e_xxx) ----
   const imgs = {};
@@ -80,6 +81,7 @@
     show('d' + idx);
   }
   function enter(s) {
+    if (Date.now() < actionUntil) return;   // 抽烟/喝酒期间不让其它状态抢画面
     state = s;
     document.body.classList.toggle('dragging', s === 'drag');
     if (s !== 'idle') document.body.classList.remove('faceLeft');  // 情绪/拖拽帧不镜像
@@ -91,7 +93,7 @@
   }
   function triggerEmotion(name, holdMs = 1500) {
     if (state === 'drag') return;
-    if (isDizzy()) return;                 // 眩晕期间不被其它情绪打断
+    if (isBusy()) return;                  // 眩晕 / 抽烟喝酒期间不被其它情绪打断
     clearTimeout(emotionTimer);
     enter('emotion');
     show('e_' + name);
@@ -101,6 +103,7 @@
   // ---- 眩晕：快速拖动触发，头顶转圈 + 身体摇晃 ----
   function isDizzy() { return Date.now() < dizzyUntil; }
   function setDizzy(ms = 2000) {
+    if (Date.now() < actionUntil) return;   // 正在抽烟/喝酒时不打断
     dizzyUntil = Date.now() + ms;
     document.body.classList.add('dizzy');
     document.body.classList.remove('faceLeft');   // 眩晕用正面帧，别镜像
@@ -113,10 +116,53 @@
       enter(focusing ? 'focus' : 'idle');
     }, ms);
   }
+
+  // ---- 抽烟 / 喝酒：30 秒，随机两种结局 ----
+  function isBusy() { return Date.now() < dizzyUntil || Date.now() < actionUntil; }
+
+  function clearAction() {
+    document.body.classList.remove('drunk', 'asleep', 'smoking', 'blue', 'revive', 'drinking');
+    actionUntil = 0;
+  }
+
+  function setAction(classes, ms, frame) {
+    clearTimeout(actionTimer);
+    clearAction();
+    document.body.classList.remove('faceLeft');
+    classes.split(' ').forEach((c) => { if (c) document.body.classList.add(c); });
+    state = 'action';
+    show(frame);
+    actionUntil = Date.now() + ms;
+    actionTimer = setTimeout(() => {
+      clearAction();
+      enter(focusing ? 'focus' : 'idle');
+    }, ms);
+  }
+
+  function startAction(type) {
+    if (isBusy()) return;
+    const parts = String(type).split(':');   // drink:drunk / smoke:revive 可强制结局（调试用）
+    const kind = parts[0];
+    const force = parts[1] || '';
+    if (kind === 'drink') {
+      if (force === 'drunk' || (!force && Math.random() < 0.55)) {
+        setAction('drinking drunk', 30000, 'e_shy');        // 打醉拳：左右晃悠
+      } else {
+        setAction('drinking asleep', 30000, 'e_sleepy');    // 呼呼大睡
+      }
+    } else if (kind === 'smoke') {
+      if (force === 'revive' || (!force && Math.random() < 0.5)) {
+        setAction('smoking revive', 30000, 'e_cheer');   // 满血复活
+        setTimeout(() => document.body.classList.remove('revive'), 1500);
+      } else {
+        setAction('smoking blue', 30000, 'e_sad');       // 忧郁
+      }
+    }
+  }
   function scheduleBlink() {
     const wait = 2200 + Math.random() * 4200;
     blinkTimer = setTimeout(() => {
-      if (isDizzy()) { scheduleBlink(); return; }   // 晕着的时候别眨眼
+      if (isBusy()) { scheduleBlink(); return; }   // 晕着/抽烟喝酒的时候别眨眼
       if (state === 'idle' && !focusing) {
         show('e_wink');
         setTimeout(() => { if (state === 'idle' && !focusing) showDirection(); }, 130);
@@ -207,6 +253,9 @@
         if (asleep) { if (state !== 'drag') enter('sleepy'); }
         else if (state === 'sleepy') enter('idle');
       });
+    }
+    if (ipc.onAction) {
+      ipc.onAction((type) => startAction(type));
     }
     if (ipc.onAutoMood) {
       ipc.onAutoMood((on) => { autoMood = !!on; });

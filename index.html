@@ -108,6 +108,99 @@
       overflow: hidden;
     }
     .eye svg { width: 90%; height: 90%; animation: dizzySpin .9s linear infinite; }
+
+    /* ---- 抽烟：香烟 + 烟圈 ---- */
+    #cig, #smoke, #zzz, #burst {
+      position: absolute; pointer-events: none; opacity: 0;
+      transition: opacity .18s ease;
+    }
+    #cig {
+      left: 57%; top: 57%;
+      width: 2.6%; height: 11%;
+      background: linear-gradient(#fdfdfd 74%, #ff8a3d 74%);
+      border-radius: 1px;
+      transform-origin: bottom center;
+      transform: rotate(26deg);
+      z-index: 5;
+      box-shadow: 0 0 2px rgba(0, 0, 0, .3);
+    }
+    body.smoking #cig { opacity: 1; }
+
+    /* 酒瓶：喝的时候出现在嘴左侧 */
+    #bottle {
+      position: absolute; pointer-events: none; opacity: 0;
+      transition: opacity .18s ease;
+      left: 44%; top: 55%;
+      width: 4.6%; height: 14%;
+      background: linear-gradient(#8fd08a 0 18%, #4a8f4a 18% 30%, #b9812f 30% 100%);
+      border-radius: 2px 2px 3px 3px;
+      transform-origin: bottom center;
+      transform: rotate(-28deg);
+      z-index: 5;
+      box-shadow: 0 0 2px rgba(0, 0, 0, .35);
+    }
+    body.drinking #bottle { opacity: 1; }
+    #smoke { left: 58%; top: 38%; width: 26%; height: 30%; z-index: 5; }
+    body.smoking #smoke { opacity: .9; }
+    #smoke i {
+      position: absolute; bottom: 0; left: 0;
+      width: 16%; aspect-ratio: 1 / 1; border-radius: 50%;
+      background: rgba(255, 255, 255, .6);
+      filter: blur(1.2px);
+      animation: puffUp 3.2s linear infinite;
+    }
+    #smoke i:nth-child(2) { left: 32%; animation-delay: 1.05s; }
+    #smoke i:nth-child(3) { left: 62%; animation-delay: 2.1s; }
+    @keyframes puffUp {
+      0%   { transform: translateY(0) scale(.5); opacity: 0; }
+      18%  { opacity: .85; }
+      100% { transform: translateY(-240%) scale(1.9); opacity: 0; }
+    }
+
+    /* ---- 睡着：Z z z ---- */
+    #zzz { left: 62%; top: 22%; width: 30%; height: 34%; z-index: 5; }
+    body.asleep #zzz { opacity: 1; }
+    #zzz b {
+      position: absolute; left: 0; bottom: 0;
+      font: 700 15px/1 "Microsoft YaHei", sans-serif;
+      color: #e4efff; text-shadow: 0 1px 4px rgba(0, 0, 0, .65);
+      animation: zFloat 3s linear infinite;
+    }
+    #zzz b:nth-child(2) { left: 32%; animation-delay: 1s; font-size: 12px; }
+    #zzz b:nth-child(3) { left: 60%; animation-delay: 2s; font-size: 9px; }
+    @keyframes zFloat {
+      0%   { transform: translateY(0) scale(.7); opacity: 0; }
+      25%  { opacity: .95; }
+      100% { transform: translateY(-200%) translateX(40%) scale(1.2); opacity: 0; }
+    }
+
+    /* ---- 醉拳式晃悠 ---- */
+    @keyframes drunkSway {
+      0%, 100% { transform: rotate(-8deg) translateX(-3%); }
+      25%      { transform: rotate(7deg)  translateX(3%) translateY(-2%); }
+      50%      { transform: rotate(-6deg) translateX(-2%) translateY(1%); }
+      75%      { transform: rotate(9deg)  translateX(4%) translateY(-1%); }
+    }
+    body.drunk #breath { animation: drunkSway 1.9s ease-in-out infinite; }
+
+    /* ---- 忧郁：褪色 ---- */
+    body.blue #breath { filter: grayscale(.75) brightness(.86) drop-shadow(0 4px 10px rgba(0, 0, 0, .42)); }
+
+    /* ---- 满血复活：一圈光 ---- */
+    #burst {
+      left: 50%; top: 50%; width: 74%; aspect-ratio: 1 / 1;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      border: 2px solid rgba(255, 226, 120, .95);
+      box-shadow: 0 0 12px rgba(255, 214, 90, .8), inset 0 0 12px rgba(255, 214, 90, .6);
+      z-index: 6;
+    }
+    body.revive #burst { opacity: 1; animation: burstRing 1.3s ease-out; }
+    @keyframes burstRing {
+      0%   { transform: translate(-50%, -50%) scale(.25); opacity: 1; }
+      70%  { transform: translate(-50%, -50%) scale(1.1);  opacity: .55; }
+      100% { transform: translate(-50%, -50%) scale(1.35); opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -124,6 +217,11 @@
         <i class="eye" style="left:44.86%; top:47.43%"></i>
         <i class="eye" style="left:66.31%; top:47.47%"></i>
       </div>
+      <div id="cig"></div>
+      <div id="bottle"></div>
+      <div id="smoke"><i></i><i></i><i></i></div>
+      <div id="zzz"><b>Z</b><b>Z</b><b>Z</b></div>
+      <div id="burst"></div>
     </div></div>
   </div>
   <script src="renderer.js"></script>

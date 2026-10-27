@@ -1187,6 +1187,11 @@ function setClickThrough(on) {
   }
   refreshTray();
 }
+// 抽烟 / 喝酒（30 秒随机动作）
+function doAction(type) {
+  if (win) { try { win.webContents.send('do-action', type); } catch (_) {} }
+}
+
 // 空闲自主状态（环顾 / 换表情 / 小跳）
 function setAutoMood(on) {
   settings.autoMood = !!on;
@@ -1235,6 +1240,9 @@ function menuTemplate() {
   t.push({ label: '防打扰（全屏时自动隐藏）', type: 'checkbox', checked: !!settings.antiDisturb, click: () => setAntiDisturb(!settings.antiDisturb) });
   t.push({ label: '开机自启', type: 'checkbox', checked: !!settings.openAtLogin, click: () => setOpenAtLogin(!settings.openAtLogin) });
   t.push({ label: '自动表情（空闲时自己换状态）', type: 'checkbox', checked: settings.autoMood !== false, click: () => setAutoMood(!(settings.autoMood !== false)) });
+  t.push({ type: 'separator' });
+  t.push({ label: '抽支烟（随机：复活 / 忧郁，30 秒）', click: () => doAction('smoke') });
+  t.push({ label: '喝一杯（随机：醉拳 / 大睡，30 秒）', click: () => doAction('drink') });
   t.push({ type: 'separator' });
   t.push({ label: '功能说明 / 快捷键', click: openUsage });
   t.push({ label: '退出', click: quitApp });
@@ -1466,6 +1474,17 @@ if (!gotTheLock) {
         } catch (e) { console.log('[emo] err ' + e.message); }
         app.exit(0);
       }, 3000);
+    }
+    if (process.env.PET_TEST_ACTION) {
+      setTimeout(() => { try { win.webContents.send('do-action', process.env.PET_TEST_ACTION); } catch (_) {} }, 1600);
+      setTimeout(async () => {
+        try {
+          const img = await win.webContents.capturePage();
+          fs.writeFileSync(process.env.PET_TEST_ACTION_OUT, img.toPNG());
+          console.log('[action] captured ' + process.env.PET_TEST_ACTION);
+        } catch (e) { console.log('[action] err ' + e.message); }
+        app.exit(0);
+      }, 2700);
     }
     if (process.env.PET_TEST_GAZE) {
       setTimeout(async () => {

@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('pet', {
   // ---------- 事件反应系统：系统闲置 -> 睡 / 醒 ----------
   onIdle: (cb) => ipcRenderer.on('idle-state', (_e, asleep) => cb(asleep)),
 
+  // ---------- 抽烟 / 喝酒 ----------
+  onAction: (cb) => ipcRenderer.on('do-action', (_e, type) => cb(type)),
+
   // ---------- 空闲自主状态开关 ----------
   onAutoMood: (cb) => ipcRenderer.on('auto-mood', (_e, on) => cb(on)),
 
