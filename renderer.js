@@ -244,6 +244,27 @@
     if (pose.frame) show(pose.frame);   // 空帧（比如纯挤压动作）不动当前脸
   }
 
+  // ---- 定格取帧（只给自动化测试用）----
+  // 为什么需要：按时间采样截图的时机永远对不准。"抖一抖"0.9 秒抖 7 个来回，
+  // 截图一张要几十毫秒，采到的相位完全随机 —— 有时正好全落在过零点，看起来
+  // 就"根本没动"。这个钩子直接把动作按归一化时间 t 定格，想要哪一帧给哪一帧。
+  let frozenPose = null;
+  window.__petStrip = function (id, t) {
+    const def = anim.profile.clipById[id];
+    if (!def) return false;
+    const s = window.PetAnim.sampleKeys(def.keys, clamp(t, 0, 1));
+    frozenPose = {
+      dx: s.dx, dy: s.dy, rot: s.rot, sx: s.sx, sy: s.sy,
+      headRot: s.headRot, headDx: s.headDx, headDy: s.headDy,
+      headSx: s.headSx, headSy: s.headSy,
+      frame: anim.profile.resolveFrame(s.frame || 'front'),
+      facing: 0, state: 'gesture',
+    };
+    applyPose(frozenPose);
+    show(frozenPose.frame);
+    return true;
+  };
+
   // 引擎的状态变化同步到渲染层状态机：走完/播完都要回到待机，否则朝向会卡住
   let animPhase = '';
   function syncAnimState() {
@@ -709,6 +730,16 @@
     const dt = lastFrameAt ? Math.min(120, ts - lastFrameAt) : 16;
     lastFrameAt = ts;
 
+    // 定格模式（只给自动化测试用）：引擎不推进，主循环只负责把定格的那一帧
+    // 反复贴上去。否则 rAF 会在 16ms 内把 __petStrip 写的姿态覆盖掉，
+    // 截出来的其实全是待机姿态 —— 这一版之前就踩了这个坑。
+    if (frozenPose) {
+      applyPose(frozenPose);
+      tiltCur.rx = 0; tiltCur.ry = 0; gaze.y = 0;
+      tilt.style.transform = 'perspective(700px) rotateY(0deg) rotateX(0deg) translateY(0px)';
+      return;
+    }
+
     const pose = anim.tick(dt);
     applyPose(pose);
     applyAnimFrame(pose);
@@ -720,6 +751,9 @@
     tilt.style.transform = `perspective(700px) rotateY(${tiltCur.ry}deg) rotateX(${tiltCur.rx}deg) translateY(${gaze.y}px)`;
   }
   requestAnimationFrame(loop);
+
+  // 清掉定格：恢复成"引擎说了算"
+  window.__petStripEnd = function () { frozenPose = null; };
 
   // ---- 透明区域不挡鼠标 ----
   // 由主进程每 30ms 读取真实光标位置 + 当前帧 alpha 判断并切换，渲染端不参与，

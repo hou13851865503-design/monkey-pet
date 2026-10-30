@@ -6,6 +6,7 @@
 背景用浅灰棋盘：桌宠是透明底，直接叠在纯色上看不出边缘。
 """
 import os
+import re
 import sys
 from PIL import Image
 
@@ -26,15 +27,24 @@ def checker(w, h, step=16):
 def main():
     out = sys.argv[1]
     ids = sys.argv[2:]
-    prefix = os.environ.get('SHEET_PREFIX', 'a')
+    prefix = os.environ.get('SHEET_PREFIX', '')   # 不给就认任意前缀（分批采样时前缀不一样）
     rows = []
     for cid in ids:
-        files = sorted(
-            [f for f in os.listdir(SHOTS) if f.startswith(prefix + '_' + cid + '_')],
-            key=lambda f: int(f.rsplit('_', 1)[1].split('.')[0]),
-        )
-        if files:
-            rows.append((cid, [Image.open(os.path.join(SHOTS, f)).convert('RGBA') for f in files]))
+        # 分批采样时同一个动作可能被截过好几轮（前缀 a/b/c/d…），
+        # 只取最新那一轮：按前缀从后往前找，找到就不再看更老的。
+        got = None
+        for pre in sorted({m.group(1) for f in os.listdir(SHOTS)
+                           for m in [re.match(r'^([a-z]+)_(.+)_\d+\.png$', f)] if m}, reverse=True):
+            files = [f for f in os.listdir(SHOTS)
+                     if re.match(r'^' + pre + r'_' + re.escape(cid) + r'_\d+\.png$', f)]
+            if prefix:
+                files = [f for f in files if pre == prefix]
+            if files:
+                files.sort(key=lambda f: int(f.rsplit('_', 1)[1].split('.')[0]))
+                got = (cid, [Image.open(os.path.join(SHOTS, f)).convert('RGBA') for f in files])
+                break
+        if got:
+            rows.append(got)
     if not rows:
         print('no shots')
         return

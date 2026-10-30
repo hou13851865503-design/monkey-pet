@@ -2086,6 +2086,32 @@ async function testClips() {
   app.exit(0);
 }
 
+// 定格取帧：PET_TEST_STRIP=a,b,c + PET_TEST_STRIP_T=0,0.2,0.4...
+// 按归一化时间直接定格，不跟时钟赛跑。用来做"每个动作到底长什么样"的对比图，
+// 快频动作（抖一抖 0.9 秒抖 7 个来回）靠按时间截图是对不准相位的。
+async function testStrip() {
+  const ids = String(process.env.PET_TEST_STRIP || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const ts = String(process.env.PET_TEST_STRIP_T || '0,0.2,0.4,0.6,0.8,1').split(',')
+    .map((s) => Number(s.trim())).filter((v) => isFinite(v));
+  const out = process.env.PET_TEST_STRIP_OUT || 'strip';
+  await sleep(2000);
+  if (!win) { app.exit(1); return; }
+  for (const id of ids) {
+    let ok = 0;
+    for (let i = 0; i < ts.length; i++) {
+      const r = await win.webContents.executeJavaScript(
+        'window.__petStrip(' + JSON.stringify(id) + ', ' + ts[i] + ')');
+      if (!r) break;
+      await sleep(140);   // 等切帧的透明度过渡走完（.f 是 .24s 交叉淡入）
+      const img = await win.webContents.capturePage();
+      fs.writeFileSync(out + '_' + id + '_' + i + '.png', img.toPNG());
+      ok++;
+    }
+    console.log('[strip] ' + id + ' ' + ok + '/' + ts.length);
+  }
+  app.exit(0);
+}
+
 // 自动化动作测试：PET_TEST_CLIP=<动作 id> 在真机上播一次并采样姿态，
 // 用来确认"动作表 -> 引擎 -> DOM"这条链在渲染层真的成立（单测只覆盖到引擎）。
 async function testClip() {
@@ -2233,6 +2259,7 @@ function createWindow() {
 const TEST_ENV = [
   'PET_TEST_CLIPS', 'PET_TEST_CLIP', 'PET_TEST_WALK', 'PET_TEST_DRAG',
   'PET_TEST_TAP', 'PET_TEST_EMOTION', 'PET_TEST_RECT', 'PET_TEST_SHOTS', 'PET_TEST_ACTION',
+  'PET_TEST_STRIP',
 ];
 const testRun = TEST_ENV.some((k) => !!process.env[k]);
 const gotTheLock = testRun ? true : app.requestSingleInstanceLock();
@@ -2264,6 +2291,7 @@ if (!gotTheLock) {
     if (process.env.PET_TEST_WALK) testWalk();
     if (process.env.PET_TEST_CLIP) testClip();
     if (process.env.PET_TEST_CLIPS) testClips();
+    if (process.env.PET_TEST_STRIP) testStrip();
     if (process.env.PET_TEST_TAP) testTap();
     if (process.env.PET_TEST_EMOTION) {
       setTimeout(() => emitEmotion('angry'), 2200);
