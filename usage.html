@@ -153,6 +153,7 @@
           <tr class="item"><td class="k">名片识别</td><td class="how">图片拖到小猴身上 / 菜单「识别名片图片…」</td><td class="note"><span class="tag need">需 Key + 视觉模型</span> 抽取姓名/公司/职位/电话/邮箱/地址/网址，可复制 JSON</td></tr>
           <tr class="item"><td class="k">语音朗读（TTS）</td><td class="how">AI 设置里勾选「语音朗读」</td><td class="note"><span class="tag free">免费</span> 用 Windows 系统语音；没声音就去系统设置装中文语音</td></tr>
           <tr class="item"><td class="k">每日早报</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> 或菜单</td><td class="note"><span class="tag free">无需 Key</span> 天气 + 一条热点；设好时间会每天自动弹</td></tr>
+          <tr class="item"><td class="k">PDF 论文解析</td><td class="how"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd> 或 菜单「解析 PDF 论文…」，也可把 PDF 拖进窗口</td><td class="note"><span class="tag free">无需 Key 也能跑</span> 提炼 研究问题 / 研究方法 / 主要结论 / 关键贡献，可看 JSON、复制、导出 Markdown。限制：PDF ≤ 30MB、≤ 60 页、需含可选中文字（扫描件要先 OCR）。配了 Key 用 AI 读得更准，没配就用本地规则抽取</td></tr>
         </tbody>
       </table>
     </section>
@@ -172,6 +173,7 @@
           <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd></td><td>AI 对话</td><td class="note">需配置 Key</td></tr>
           <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd></td><td>AI 设置</td><td class="note"></td></tr>
           <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td><td>立即生成每日早报</td><td class="note">无需 Key</td></tr>
+          <tr class="item"><td class="k"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></td><td>PDF 论文解析</td><td class="note">无需 Key 也能用</td></tr>
         </tbody>
       </table>
     </section>
@@ -185,6 +187,8 @@
           <tr class="item"><td class="k">AI 对话报错</td><td class="note">Key/Base URL/模型名不对；或没开代理（本程序走系统代理，FlClash 要开着）</td><td></td></tr>
           <tr class="item"><td class="k">名片识别没结果</td><td class="note">模型不支持图片输入，换视觉模型（如 gpt-4o-mini / gpt-4o）</td><td></td></tr>
           <tr class="item"><td class="k">TTS 没声音</td><td class="note">系统没装中文语音：Windows 设置 → 时间和语言 → 语音，添加中文</td><td></td></tr>
+          <tr class="item"><td class="k">论文解析报「可能是扫描件」</td><td class="note">PDF 里没有可选中文字（图片版扫描件），要先做 OCR；不配 Key 用规则抽取也能出结果</td><td></td></tr>
+          <tr class="item"><td class="k">论文标题/作者识别成文件名</td><td class="note">版式太特殊（多栏、封面页信息混杂）时启发式会退化；配了 AI 接口后走模型路径更稳</td><td></td></tr>
           <tr class="item"><td class="k">网速显示 N/A</td><td class="note">PowerShell 的 Get-NetAdapterStatistics 不可用；CPU/内存仍然正常</td><td></td></tr>
           <tr class="item"><td class="k">早报天气/热帖失败</td><td class="note">网络或代理问题；天气用 wttr.in、热帖用 V2EX，可隔天再试</td><td></td></tr>
           <tr class="item"><td class="k">配置存在哪</td><td class="note"><code>%APPDATA%\monkey-pet\settings.json</code>（含 API Key，注意别外传）</td><td></td></tr>

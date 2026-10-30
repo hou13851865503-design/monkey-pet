@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>PDF 论文解析</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #f6f7fa; --card: #fff; --line: #e6e9f0; --ink: #20242c;
+      --dim: #7b8494; --faint: #9aa2b1; --blue: #3b82f6; --blue-soft: #e8edf6;
+      --green: #2f9e63; --amber: #c98118; --purple: #7a5af0;
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0; padding: 16px 18px 0;
+      font-family: "Microsoft YaHei", system-ui, sans-serif;
+      background: var(--bg); color: var(--ink);
+      display: flex; flex-direction: column; height: 100vh;
+    }
+    header { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; }
+    h1 { font-size: 17px; margin: 0; }
+    .badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 20px;
+      background: #eef1f6; color: var(--dim);
+    }
+    .badge.llm { background: #eeeafd; color: var(--purple); }
+    .badge.heur { background: #fff4e3; color: var(--amber); }
+    header .grow { flex: 1; }
+    .hint { font-size: 11px; color: var(--faint); }
+
+    /* ---------- 拖放区 ---------- */
+    #drop {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border: 2px dashed #cfd6e4; border-radius: 16px; background: #fbfcfe;
+      margin: 14px 0 16px; cursor: pointer; transition: border-color .15s, background .15s;
+      text-align: center; padding: 20px;
+    }
+    #drop:hover, #drop.over { border-color: var(--blue); background: #f2f7ff; }
+    #drop .icon { font-size: 40px; line-height: 1; margin-bottom: 12px; opacity: .55; }
+    #drop .big { font-size: 15px; margin-bottom: 6px; }
+    #drop .small { font-size: 12px; color: var(--faint); line-height: 1.7; }
+    #drop .small b { color: var(--dim); font-weight: 600; }
+
+    /* ---------- 进度 ---------- */
+    #prog { flex: 1; display: none; align-items: center; justify-content: center; }
+    #prog .pcard { width: 70%; min-width: 380px; max-width: 520px; display: flex; flex-direction: column; gap: 12px; }
+    #prog .pfile {
+      font-size: 13px; font-weight: 600; color: var(--ink); text-align: center; line-height: 1.5;
+      word-break: break-word; overflow-wrap: break-word;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    #prog .bar { width: 100%; height: 6px; border-radius: 3px; background: #e4e8f0; overflow: hidden; }
+    #prog .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #57b894, #3b82f6); transition: width .3s ease; }
+    #prog .txt { font-size: 13px; color: var(--dim); text-align: center; }
+    #prog .sub { font-size: 11px; color: var(--faint); text-align: center; line-height: 1.6; }
+    #prog .steps { list-style: none; margin: 6px auto 0; padding: 0; display: flex; flex-direction: column; gap: 8px; width: fit-content; }
+    #prog .steps li { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--faint); transition: color .2s; }
+    #prog .steps li b { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #d3d9e4; flex: none; position: relative; }
+    #prog .steps li.on { color: var(--ink); }
+    #prog .steps li.on b { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.14); }
+    #prog .steps li.done { color: var(--dim); }
+    #prog .steps li.done b { border-color: #57b894; background: #57b894; }
+    #prog .steps li.done b::after {
+      content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+      border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+    }
+
+    /* ---------- 结果 ---------- */
+    #result { flex: 1; overflow-y: auto; display: none; padding-bottom: 14px; }
+    .meta {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 12px 14px; margin-bottom: 12px;
+    }
+    .meta .t { font-size: 15px; font-weight: 700; line-height: 1.4; }
+    .meta .a { font-size: 12px; color: var(--dim); margin-top: 5px; }
+    .meta .f { font-size: 11px; color: var(--faint); margin-top: 7px; display: flex; flex-wrap: wrap; gap: 10px; }
+    .sec {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 12px 14px; margin-bottom: 10px;
+    }
+    .sec h2 {
+      font-size: 13px; margin: 0 0 8px; display: flex; align-items: center; gap: 7px;
+    }
+    .sec h2 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+    .sec.q h2 .dot { background: #e5534b; }
+    .sec.m h2 .dot { background: var(--blue); }
+    .sec.f h2 .dot { background: var(--green); }
+    .sec.c h2 .dot { background: var(--purple); }
+    .sec p { margin: 0; font-size: 13px; line-height: 1.65; }
+    .sec ol, .sec ul { margin: 8px 0 0; padding-left: 20px; }
+    .sec li { font-size: 13px; line-height: 1.6; margin-bottom: 6px; }
+    .sec li .ev { display: block; color: var(--faint); font-size: 11.5px; margin-top: 2px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+    .chip { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: #eef1f6; color: var(--dim); }
+    .chip.out { background: #f3f5f9; color: #8d95a3; }
+    .chip .n { color: var(--faint); margin-left: 4px; }
+    .note {
+      background: #fff8ec; border: 1px solid #f5e3c4; color: #8a6420;
+      font-size: 12px; line-height: 1.6; border-radius: 10px; padding: 9px 12px; margin-bottom: 10px;
+    }
+    .json {
+      background: #1e2129; color: #d7dde9; border-radius: 12px; padding: 12px 14px;
+      font: 12px/1.6 Consolas, "Courier New", monospace;
+      white-space: pre-wrap; word-break: break-word; margin-bottom: 10px;
+    }
+
+    /* ---------- 底栏 ---------- */
+    footer {
+      flex: 0 0 auto; border-top: 1px solid var(--line);
+      padding: 10px 0; display: flex; align-items: center; gap: 8px;
+      background: var(--bg);
+    }
+    footer .grow { flex: 1; font-size: 11px; color: var(--faint); line-height: 1.5; }
+    button {
+      border: 0; border-radius: 9px; padding: 8px 14px; font-size: 13px;
+      cursor: pointer; font-family: inherit; background: var(--blue); color: #fff;
+    }
+    button.ghost { background: #e8edf6; color: #33405a; }
+    button:disabled { opacity: .5; cursor: default; }
+    .toast {
+      position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
+      background: rgba(32, 36, 44, .92); color: #fff; font-size: 12px;
+      padding: 8px 14px; border-radius: 20px; opacity: 0; transition: opacity .2s;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PDF 论文解析</h1>
+    <span class="badge" id="engineBadge" style="display:none"></span>
+    <span class="grow"></span>
+    <span class="hint" id="hint">Ctrl+Shift+D 打开</span>
+  </header>
+
+  <!-- 1. 拖放 / 选择 -->
+  <div id="drop">
+    <div class="icon">📄</div>
+    <div class="big">把 PDF 论文拖到这里</div>
+    <div class="small">
+      或点击选择文件 · 支持 <b>.pdf</b> · 单个文件 <b>≤ 30MB</b> · 只读前 <b>60 页</b><br />
+      输出：研究问题 / 研究方法 / 主要结论 / 关键贡献
+    </div>
+  </div>
+
+  <!-- 2. 进度 -->
+  <div id="prog">
+    <div class="pcard">
+      <div class="pfile" id="pfile">准备中…</div>
+      <div class="bar"><i id="pbar"></i></div>
+      <div class="txt" id="ptxt">准备中…</div>
+      <div class="sub" id="psub"></div>
+      <ol class="steps" id="psteps">
+        <li data-k="read"><b></b><span>读取文件</span></li>
+        <li data-k="extract"><b></b><span>抽取文字</span></li>
+        <li data-k="split"><b></b><span>切分章节</span></li>
+        <li data-k="llm"><b></b><span>结构化抽取</span></li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- 3. 结果 -->
+  <div id="result"></div>
+
+  <footer>
+    <div class="grow" id="foot">解析结果只在本机处理，不会上传到任何服务器（除你自己配置的 AI 接口）</div>
+    <button class="ghost" id="jsonBtn" disabled>看 JSON</button>
+    <button class="ghost" id="copyBtn" disabled>复制</button>
+    <button class="ghost" id="saveBtn" disabled>导出</button>
+    <button id="pickBtn">选择文件</button>
+  </footer>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const api = window.pet || {};
+    const $ = (id) => document.getElementById(id);
+    let state = { file: null, result: null, view: 'read', busy: false };
+
+    function toast(msg) {
+      const t = $('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(t._h);
+      t._h = setTimeout(() => t.classList.remove('show'), 1800);
+    }
+
+    // ---------- 视图切换 ----------
+    function showDrop() {
+      $('drop').style.display = 'flex';
+      $('prog').style.display = 'none';
+      $('result').style.display = 'none';
+      setActions(false);
+    }
+    function showProgress(text, sub, percent, stage) {
+      $('drop').style.display = 'none';
+      $('prog').style.display = 'flex';
+      $('result').style.display = 'none';
+      $('pbar').style.width = (percent || 0) + '%';
+      $('ptxt').textContent = text || '';
+      $('psub').textContent = sub || '';
+      markSteps(stage);
+      setActions(false);
+    }
+    // 步骤清单：read → extract → split → llm，已走过的置勾，当前的高亮
+    const ORDER = ['read', 'extract', 'split', 'llm'];
+    function markSteps(stage) {
+      const at = ORDER.indexOf(stage);
+      $('psteps').querySelectorAll('li').forEach((li) => {
+        const i = ORDER.indexOf(li.dataset.k);
+        li.classList.toggle('done', at >= 0 && i < at);
+        li.classList.toggle('on', i === at);
+      });
+    }
+    function setProgressFile(name) {
+      $('pfile').textContent = name || '';
+    }
+    function showResult() {
+      $('drop').style.display = 'none';
+      $('prog').style.display = 'none';
+      $('result').style.display = 'block';
+      setActions(true);
+    }
+    function setActions(on) {
+      ['jsonBtn', 'copyBtn', 'saveBtn'].forEach((id) => { $(id).disabled = !on; });
+    }
+
+    // ---------- 渲染 ----------
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function list(items, cls) {
+      if (!items || !items.length) return '';
+      return '<ul class="' + (cls || '') + '">' +
+        items.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul>';
+    }
+
+    function renderRead(r) {
+      const m = r.meta || {};
+      const rq = r.researchQuestion || {};
+      const me = r.method || {};
+      const chips = [];
+      if (me.data && me.data.length) me.data.forEach((d) => chips.push('<span class="chip">' + esc(d) + '</span>'));
+      if (me.metrics && me.metrics.length) me.metrics.forEach((d) => chips.push('<span class="chip">' + esc(d) + '</span>'));
+      if (r.keywords && r.keywords.length) r.keywords.forEach((d) => chips.push('<span class="chip">#' + esc(d) + '</span>'));
+
+      const outline = (r.outline || []).map((o) =>
+        '<span class="chip out">' + esc(o.heading.slice(0, 26)) + '<span class="n">' + o.chars + '字</span></span>'
+      ).join('');
+
+      const html = [];
+      if (r.note) html.push('<div class="note">' + esc(r.note) + '</div>');
+
+      html.push(
+        '<div class="meta">' +
+        '<div class="t">' + esc(m.title || m.fileName || '（未识别标题）') + '</div>' +
+        (m.authors ? '<div class="a">' + esc(m.authors) + '</div>' : '') +
+        '<div class="f">' +
+        (m.year ? '<span>' + esc(m.year) + '</span>' : '') +
+        (m.venue ? '<span>' + esc(m.venue) + '</span>' : '') +
+        '<span>' + (m.pageCount || 0) + ' 页' + (m.truncated ? '（只读了前 ' + m.usedPages + ' 页）' : '') + '</span>' +
+        '<span>' + (m.chars || 0).toLocaleString() + ' 字符</span>' +
+        '<span>' + ((m.bytes || 0) / 1048576).toFixed(1) + ' MB</span>' +
+        '</div></div>'
+      );
+
+      html.push(
+        '<div class="sec q"><h2><i class="dot"></i>研究问题</h2>' +
+        '<p>' + esc(rq.summary || '（未提取到）') + '</p>' +
+        list(rq.subQuestions) +
+        '</div>'
+      );
+
+      html.push(
+        '<div class="sec m"><h2><i class="dot"></i>研究方法</h2>' +
+        '<p>' + esc(me.summary || '（未提取到）') + '</p>' +
+        list(me.steps) +
+        (chips.length ? '<div class="chips">' + chips.join('') + '</div>' : '') +
+        '</div>'
+      );
+
+      const findings = (r.findings || []).map((f) =>
+        '<li>' + esc(f.claim) + (f.evidence ? '<span class="ev">证据：' + esc(f.evidence) + '</span>' : '') + '</li>'
+      ).join('');
+      html.push(
+        '<div class="sec f"><h2><i class="dot"></i>主要结论</h2>' +
+        (findings ? '<ol>' + findings + '</ol>' : '<p>（未提取到）</p>') +
+        '</div>'
+      );
+
+      const contribs = (r.contributions || []).map((c) =>
+        '<li>' + (c.type ? '<b>[' + esc(c.type) + ']</b> ' : '') + esc(c.point) + '</li>'
+      ).join('');
+      html.push(
+        '<div class="sec c"><h2><i class="dot"></i>关键贡献</h2>' +
+        (contribs ? '<ul>' + contribs + '</ul>' : '<p>（未提取到）</p>') +
+        (r.limitations && r.limitations.length ? '<div style="margin-top:10px"><h2 style="font-size:12px;color:#7b8494"><i class="dot" style="background:#c9ced8"></i>作者提到的局限</h2>' + list(r.limitations) + '</div>' : '') +
+        '</div>'
+      );
+
+      if (outline) {
+        html.push('<div class="sec"><h2><i class="dot" style="background:#b9c0cc"></i>识别到的章节</h2><div class="chips">' + outline + '</div></div>');
+      }
+      return html.join('');
+    }
+
+    function renderJson(r) {
+      const clean = {
+        meta: r.meta, researchQuestion: r.researchQuestion, method: r.method,
+        findings: r.findings, contributions: r.contributions,
+        limitations: r.limitations, keywords: r.keywords, outline: r.outline,
+        engine: r.engine,
+      };
+      return '<div class="json">' + esc(JSON.stringify(clean, null, 2)) + '</div>';
+    }
+
+    function render() {
+      if (!state.result) return;
+      $('result').innerHTML = state.view === 'json' ? renderJson(state.result) : renderRead(state.result);
+      showResult();
+      const e = state.result.engine;
+      const b = $('engineBadge');
+      b.style.display = '';
+      b.className = 'badge ' + (e === 'llm' ? 'llm' : 'heur');
+      b.textContent = e === 'llm' ? 'AI 解读' : '规则抽取';
+      $('jsonBtn').textContent = state.view === 'json' ? '看正文' : '看 JSON';
+    }
+
+    // ---------- 流程 ----------
+    async function run(payload, label) {
+      if (state.busy) return;
+      state.busy = true;
+      state.result = null;
+      $('engineBadge').style.display = 'none';
+      setProgressFile(label || '');
+      showProgress('读取文件…', label || '', 6, 'read');
+      try {
+        const r = await api.paperAnalyze(payload);
+        if (!r || !r.ok) throw new Error((r && r.error) || '解析失败');
+        state.result = r.data;
+        state.view = 'read';
+        render();
+      } catch (e) {
+        showDrop();
+        toast(String(e.message || e));
+      } finally {
+        state.busy = false;
+      }
+    }
+
+    async function pick() {
+      const r = await api.paperPick();
+      if (!r || !r.ok) return;
+      state.file = r;
+      run({ path: r.path }, r.name);
+    }
+
+    // 拖放：优先用真实路径（Electron 里 File.path），拿不到就退化成读字节
+    async function onDrop(e) {
+      e.preventDefault();
+      $('drop').classList.remove('over');
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      if (!/\.pdf$/i.test(f.name)) { toast('只支持 .pdf 文件'); return; }
+      if (f.size > 30 * 1024 * 1024) { toast('文件超过 30MB'); return; }
+      if (f.path) { run({ path: f.path }, f.name); return; }
+      const buf = await f.arrayBuffer();
+      run({ name: f.name, bytes: new Uint8Array(buf) }, f.name);
+    }
+
+    // ---------- 事件 ----------
+    $('drop').addEventListener('click', pick);
+    $('pickBtn').addEventListener('click', pick);
+    ['dragenter', 'dragover'].forEach((k) =>
+      $('drop').addEventListener(k, (e) => { e.preventDefault(); $('drop').classList.add('over'); })
+    );
+    ['dragleave', 'drop'].forEach((k) =>
+      $('drop').addEventListener(k, (e) => { e.preventDefault(); $('drop').classList.remove('over'); })
+    );
+    $('drop').addEventListener('drop', onDrop);
+    // 拖到窗口任意位置也行
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', (e) => { if (e.target.closest('#drop') == null) onDrop(e); });
+
+    $('jsonBtn').addEventListener('click', () => {
+      state.view = state.view === 'json' ? 'read' : 'json';
+      render();
+    });
+    $('copyBtn').addEventListener('click', async () => {
+      if (!state.result) return;
+      const text = state.view === 'json'
+        ? JSON.stringify(state.result, null, 2)
+        : plainText(state.result);
+      try { await navigator.clipboard.writeText(text); toast('已复制'); }
+      catch (_) { toast('复制失败'); }
+    });
+    $('saveBtn').addEventListener('click', async () => {
+      if (!state.result) return;
+      const name = (state.result.meta.title || 'paper').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60);
+      const r = await api.paperSave({ name: name + '-解析.json', text: JSON.stringify(state.result, null, 2) });
+      if (r && r.ok) toast('已导出'); else if (r && r.error) toast(r.error);
+    });
+
+    function plainText(r) {
+      const L = [];
+      const m = r.meta || {};
+      L.push('《' + (m.title || m.fileName) + '》');
+      if (m.authors) L.push(m.authors);
+      L.push('');
+      L.push('【研究问题】' + (r.researchQuestion.summary || ''));
+      (r.researchQuestion.subQuestions || []).forEach((s) => L.push('  · ' + s));
+      L.push('');
+      L.push('【研究方法】' + (r.method.summary || ''));
+      (r.method.steps || []).forEach((s, i) => L.push('  ' + (i + 1) + '. ' + s));
+      if (r.method.data && r.method.data.length) L.push('  数据：' + r.method.data.join('；'));
+      if (r.method.metrics && r.method.metrics.length) L.push('  指标：' + r.method.metrics.join('、'));
+      L.push('');
+      L.push('【主要结论】');
+      (r.findings || []).forEach((f, i) => L.push('  ' + (i + 1) + '. ' + f.claim + (f.evidence ? '（证据：' + f.evidence + '）' : '')));
+      L.push('');
+      L.push('【关键贡献】');
+      (r.contributions || []).forEach((c, i) => L.push('  ' + (i + 1) + '. ' + (c.type ? '[' + c.type + '] ' : '') + c.point));
+      if (r.limitations && r.limitations.length) {
+        L.push('');
+        L.push('【局限与未来工作】');
+        r.limitations.forEach((s) => L.push('  · ' + s));
+      }
+      return L.join('\n');
+    }
+
+    if (api.onPaperProgress) {
+      api.onPaperProgress((p) => {
+        if (!p) return;
+        if (p.stage === 'extract' && p.page) {
+          showProgress('抽取文本…', '第 ' + p.page + ' / ' + p.pages + ' 页', p.percent, 'extract');
+        } else {
+          showProgress(
+            p.text || '处理中…',
+            p.stage === 'llm' ? '会读摘要、方法、结论三段；没配 API Key 时用规则抽取' : '',
+            p.percent,
+            p.stage
+          );
+        }
+      });
+    }
+
+    showDrop();
+  </script>
+</body>
+</html>

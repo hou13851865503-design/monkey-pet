@@ -29,7 +29,10 @@
       "settings.html",
       "chat.html",
       "card.html",
+      "paper.html",
       "usage.html",
+      "daily.js",
+      "paper.js",
       "launcher.js",
       "tools/**/*",
       "assets/**/*"
@@ -43,5 +46,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
     }
+  },
+  "dependencies": {
+    "pdfjs-dist": "^3.11.174"
   }
 }

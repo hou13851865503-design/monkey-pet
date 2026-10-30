@@ -1118,6 +1118,90 @@ function startMorningWatch() {
   setTimeout(check, 4000);
   setInterval(check, 60000);
 }
+// ---------- PDF 论文解析 ----------
+// 借鉴 paper2gal.com 的解析管线：PDF → 拆章节 → 逐章理解。
+// 我们停在"理解"这一步，把结果直接结构化输出（研究问题/方法/结论/贡献），不做游戏化。
+const paper = require('./paper');
+let paperWin = null;
+
+function openPaperTool() {
+  if (paperWin && !paperWin.isDestroyed()) { paperWin.show(); paperWin.focus(); return; }
+  paperWin = new BrowserWindow({
+    width: 800,
+    height: 840,
+    minWidth: 640,
+    minHeight: 520,
+    title: 'PDF 论文解析',
+    resizable: true,
+    autoHideMenuBar: true,
+    backgroundColor: '#f6f7fa',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  paperWin.loadFile('paper.html');
+  paperWin.on('closed', () => { paperWin = null; });
+}
+
+function paperProgress(p) {
+  if (paperWin && !paperWin.isDestroyed()) {
+    try { paperWin.webContents.send('paper-progress', p); } catch (_) {}
+  }
+}
+
+// 有 API Key 就走模型；没有就只用启发式（paper.js 里已经保证两条路径输出同构）
+function paperLlm() {
+  const ai = settings.ai || {};
+  if (!ai.apiKey) return null;
+  return async (messages, maxTokens) => {
+    try {
+      const data = await httpJson(aiBase() + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ai.apiKey },
+        body: JSON.stringify({
+          model: ai.model || 'gpt-4o-mini',
+          messages,
+          temperature: 0.2,          // 结构化抽取要稳，不要发散
+          max_tokens: maxTokens || 2000,
+        }),
+      }, 90000);
+      const text = data && data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content : '';
+      return { ok: true, text: String(text || '') };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
+  };
+}
+
+async function paperAnalyzeFile(filePath) {
+  try {
+    const result = await paper.analyze(filePath, { llm: paperLlm(), onProgress: paperProgress });
+    emitEmotion(result.engine === 'llm' ? 'cheer' : 'thinking');
+    return { ok: true, data: result };
+  } catch (e) {
+    emitEmotion('sad');
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+// 拖进来的文件在渲染进程里可能拿不到真实路径：落一份临时文件再解析
+async function paperAnalyzeBytes(name, bytes) {
+  const safe = String(name || 'paper.pdf').replace(/[^\w.\-\u4e00-\u9fa5]/g, '_');
+  const tmp = path.join(os.tmpdir(), `pet-paper-${Date.now()}-${safe}`);
+  try {
+    fs.writeFileSync(tmp, Buffer.from(bytes));
+    return await paperAnalyzeFile(tmp);
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  } finally {
+    try { fs.unlinkSync(tmp); } catch (_) {}
+  }
+}
+
+// ---------- 功能说明 / 快捷键 ----------
 function openUsage() {
   if (usageWin && !usageWin.isDestroyed()) { usageWin.show(); usageWin.focus(); return; }
   usageWin = new BrowserWindow({
@@ -1397,6 +1481,7 @@ function menuTemplate() {
   t.push({ type: 'separator' });
   t.push({ label: 'AI 对话…', click: openChat });
   t.push({ label: '识别名片图片…', click: pickCardImage });
+  t.push({ label: '解析 PDF 论文…', click: openPaperTool });
   t.push({ label: '每日早报', click: () => morningReport(true) });
   t.push({ label: 'AI 设置…', click: openAiSettings });
   t.push({ type: 'separator' });
@@ -1519,6 +1604,37 @@ function registerIpc() {
   ipcMain.handle('llm-chat', (_e, messages) => llmChat(messages));
   ipcMain.on('open-ai-settings', () => openAiSettings());
   ipcMain.on('open-chat', () => openChat());
+  ipcMain.on('open-paper', () => openPaperTool());
+  ipcMain.handle('paper-pick', async () => {
+    const r = await dialog.showOpenDialog(paperWin || null, {
+      title: '选择 PDF 论文',
+      filters: [{ name: 'PDF 论文', extensions: ['pdf'] }],
+      properties: ['openFile'],
+    });
+    if (r.canceled || !r.filePaths || !r.filePaths.length) return { ok: false, canceled: true };
+    return { ok: true, path: r.filePaths[0], name: path.basename(r.filePaths[0]) };
+  });
+  ipcMain.handle('paper-analyze', async (_e, payload) => {
+    const p = payload || {};
+    if (p.path) return paperAnalyzeFile(p.path);
+    if (p.bytes) return paperAnalyzeBytes(p.name, p.bytes);
+    return { ok: false, error: '没有拿到文件' };
+  });
+  ipcMain.handle('paper-save', async (_e, payload) => {
+    const p = payload || {};
+    const r = await dialog.showSaveDialog(paperWin || null, {
+      title: '导出解析结果',
+      defaultPath: p.name || 'paper-analysis.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+    try {
+      fs.writeFileSync(r.filePath, String(p.text || ''), 'utf8');
+      return { ok: true, path: r.filePath };
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
+  });
   ipcMain.on('extract-card', (_e, p) => runCardExtraction(p));
   ipcMain.on('speak', (_e, t) => speakText(t));
   ipcMain.on('morning-report', () => morningReport(true));
@@ -1832,6 +1948,82 @@ if (!gotTheLock) {
         app.exit(0);
       }, 2600);
     }
+    if (process.env.PET_TEST_PAPER_UI) {
+      // 只截"进度中"这一屏：短论文解析太快，抓不住中间态，直接喂一个假进度
+      const out = process.env.PET_TEST_PAPER_UI;
+      setTimeout(() => openPaperTool(), 900);
+      setTimeout(async () => {
+        try {
+          await paperWin.webContents.executeJavaScript(
+            "setProgressFile('37_2306.08302_Unifying Large Language Models and Knowledge Graphs - A Roadmap.pdf');" +
+            "showProgress('抽取文本…', '第 12 / 28 页', 42, 'extract');"
+          );
+        } catch (e) { console.log('[paper-ui] ' + e.message); }
+      }, 1600);
+      setTimeout(async () => {
+        try {
+          console.log('[paper-ui] win ' + (paperWin ? JSON.stringify({ vis: paperWin.isVisible(), b: paperWin.getBounds(), destroyed: paperWin.isDestroyed() }) : 'null'));
+          if (paperWin && !paperWin.isDestroyed()) { paperWin.show(); paperWin.focus(); }
+          await new Promise((r) => setTimeout(r, 350));
+          const img = await paperWin.webContents.capturePage();
+          const buf = img.toPNG();
+          if (buf.length) fs.writeFileSync(out, buf);
+          console.log('[paper-ui] shot ' + buf.length);
+        } catch (e) { console.log('[paper-ui] err ' + e.message); }
+        app.exit(0);
+      }, 3400);
+    }
+    if (process.env.PET_TEST_PAPER) {
+      const pdf = process.env.PET_TEST_PAPER;
+      const out = process.env.PET_TEST_PAPER_OUT || path.join(process.cwd(), '_paper.png');
+      const alive = () => paperWin && !paperWin.isDestroyed();
+      const sleep = (n) => new Promise((r) => setTimeout(r, n));
+      // 窗口被遮挡时 capturePage 会返回上一帧甚至是空图，先显式抬到最前再截
+      const shot = async (file) => {
+        if (!alive()) return -1;
+        paperWin.show(); paperWin.moveTop();
+        await sleep(380);
+        const buf = (await paperWin.webContents.capturePage()).toPNG();
+        if (buf.length) fs.writeFileSync(file, buf);
+        return buf.length;
+      };
+      setTimeout(() => openPaperTool(), 900);
+      setTimeout(async () => {
+        try {
+          await paperWin.webContents.executeJavaScript(
+            'run({ path: ' + JSON.stringify(pdf) + ' }, ' + JSON.stringify(path.basename(pdf)) + ')'
+          );
+        } catch (e) { console.log('[paper] run err ' + e.message); }
+        // 轮询等渲染完成，别用固定时序赌解析速度
+        const deadline = Date.now() + 30000;
+        while (Date.now() < deadline && alive()) {
+          const n = await paperWin.webContents.executeJavaScript("document.querySelectorAll('.sec').length").catch(() => 0);
+          if (n > 0) break;
+          await sleep(250);
+        }
+        if (!alive()) { console.log('[paper] window gone'); return app.exit(1); }
+        console.log('[paper] result shot ' + (await shot(out)));
+        try {
+          const info = await paperWin.webContents.executeJavaScript(
+            '(function(){ return { secs: document.querySelectorAll(".sec").length,' +
+            ' title: (document.querySelector(".meta .t")||{}).textContent || "",' +
+            ' badge: (document.getElementById("engineBadge")||{}).textContent || "" }; })()'
+          );
+          console.log('[paper] ' + JSON.stringify(info));
+        } catch (e) { console.log('[paper] err ' + e.message); }
+        // 顺手把 JSON 视图也验一遍（截图 + 文本双校验）
+        try {
+          const v = await paperWin.webContents.executeJavaScript(
+            "(function(){ var b=document.getElementById('jsonBtn'); b.click();" +
+            " var j=document.querySelector('#result .json');" +
+            " return { label: b.textContent, hasJson: !!j, head: j ? j.textContent.slice(0,90) : '' }; })()"
+          );
+          console.log('[paper] json ' + JSON.stringify(v));
+          console.log('[paper] json shot ' + (await shot(out.replace(/\.png$/i, '_json.png'))));
+        } catch (e) { console.log('[paper] json err ' + e.message); }
+        app.exit(0);
+      }, 1700);
+    }
     if (settings.clickThrough) {
       setTimeout(() => showBubble({
         title: '注意',
@@ -1866,6 +2058,7 @@ if (!gotTheLock) {
       globalShortcut.register('CommandOrControl+Shift+A', () => openChat());
       globalShortcut.register('CommandOrControl+Shift+U', () => openAiSettings());
       globalShortcut.register('CommandOrControl+Shift+R', () => morningReport(true));
+      globalShortcut.register('CommandOrControl+Shift+D', () => openPaperTool());
     } catch (_) {}
 
     // 启动问候

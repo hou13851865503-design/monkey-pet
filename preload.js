@@ -92,6 +92,13 @@ contextBridge.exposeInMainWorld('pet', {
   chat: (messages) => ipcRenderer.invoke('llm-chat', messages),
   extractCard: (filePath) => ipcRenderer.send('extract-card', filePath),
   morningReport: () => ipcRenderer.send('morning-report'),
+
+  // ---------- PDF 论文解析 ----------
+  openPaperTool: () => ipcRenderer.send('open-paper'),
+  paperPick: () => ipcRenderer.invoke('paper-pick'),
+  paperAnalyze: (payload) => ipcRenderer.invoke('paper-analyze', payload),
+  paperSave: (payload) => ipcRenderer.invoke('paper-save', payload),
+  onPaperProgress: (cb) => ipcRenderer.on('paper-progress', (_e, p) => cb(p)),
   speak: (text) => ipcRenderer.send('speak', text),
   onSpeak: (cb) => ipcRenderer.on('speak', (_e, t) => cb(t)),
   onCardData: (cb) => ipcRenderer.on('card-data', (_e, p) => cb(p)),
