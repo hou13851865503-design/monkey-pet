@@ -63,6 +63,31 @@
       gapMax: num(s.gapMax, 18000),
       cooldown: num(s.cooldown, 40000),
     };
+
+    // 抛飞姿态：被甩出去之后身体怎么"受风"。
+    // 只有观感参数 —— 物理（阻尼/反弹/阈值）在 flight.js，读的是同一个段里的 physics。
+    // 分开是因为物理要能被单测钉住，而手感必须能随手改 0.01 就去试。
+    const f = (p.throw && p.throw.pose) || {};
+    p.throw = {
+      leanPerPx: num(f.leanPerPx, 0.010),   // 横向速度 -> 身体后仰角度（deg per px/s）
+      leanMax: num(f.leanMax, 16),          // 后仰角度上限
+      leanEase: num(f.leanEase, 0.22),      // 倾角跟随的平滑系数（0~1，越大越跟手）
+      stretchPerPx: num(f.stretchPerPx, 0.000032),  // 速度 -> 沿运动方向的拉伸量
+      stretchMax: num(f.stretchMax, 0.075),
+      bumpSquash: num(f.bumpSquash, 0.22),  // 撞墙压扁的强度
+      bumpDecay: num(f.bumpDecay, 0.80),    // 撞墙压扁每帧衰减（0.8 => 约 150ms 回弹）
+      headLag: num(f.headLag, 0.00004),     // 头的滞后量（vx * 这个值）
+      headLagMax: num(f.headLagMax, 0.03),
+      calmSpeed: num(f.calmSpeed, 700),     // 低于这个速度就不再摆惊讶脸
+      airDy: num(f.airDy, -0.012),          // 腾空时整只往上抬一点
+    };
+    p.throw.leanPerPx = clamp(p.throw.leanPerPx, 0, 0.05);
+    p.throw.leanMax = clamp(p.throw.leanMax, 0, 45);
+    p.throw.leanEase = clamp(p.throw.leanEase, 0.02, 1);
+    p.throw.stretchMax = clamp(p.throw.stretchMax, 0, 0.3);
+    p.throw.bumpSquash = clamp(p.throw.bumpSquash, 0, 0.5);
+    p.throw.bumpDecay = clamp(p.throw.bumpDecay, 0.3, 0.99);
+    p.throw.headLagMax = clamp(p.throw.headLagMax, 0, 0.1);
     p.anchorFoot = clamp(num(p.anchors.foot, 0.995), 0.5, 1.2);
 
     // 底部安全余量：素材的脚底常常正好压在图片最后一行（本形象底部留白 0px），
@@ -168,6 +193,7 @@
       external: '',         // 外部占用的语义状态：'action' | 'sleep' | 'focus' | ''
       walk: { on: false, dir: 1, phase: 0, dist: 0 },
       drag: { on: false, vx: 0, vy: 0, rot: 0, sy: 1, ax: 0, ay: 0 },
+      fly: { on: false, vx: 0, vy: 0, rot: 0, bumpX: 0, bumpY: 0, air: 0 },
       lastGesture: '',
       lastAt: {},           // id -> 上次播放时间
       nextGestureAt: num(o.firstGestureAt, P.schedule.gapMin),
@@ -175,7 +201,8 @@
     };
 
     // 内部统一用这个判断，别直接读 st.busy（st 上没有这个字段）
-    const isBusy = () => st.now < st.lockedUntil || st.state === 'drag';
+    // fly 也算"忙"：飞在半空中被自主动作抢画面会非常跳（还可能在撞墙那一帧切表情）
+    const isBusy = () => st.now < st.lockedUntil || st.state === 'drag' || st.state === 'fly';
 
     const api = {
       profile: P,
@@ -282,6 +309,40 @@
         return api.play('land', { force: true, scale: 0.45 + k * 0.75 });
       },
 
+      // ---- 抛飞：被甩出去之后的腾空姿态 ----
+      // 三个信号：起飞（初速）、飞行中每帧的真实速度、撞墙。
+      // 速度必须每帧给 —— 只知道初速的话，撞墙之后身体会继续朝旧方向后仰。
+      startFly(vx, vy) {
+        const f = st.fly;
+        f.on = true;
+        f.vx = num(vx, 0); f.vy = num(vy, 0);
+        f.rot = 0; f.bumpX = 0; f.bumpY = 0;
+        st.clip = null;
+        if (st.walk.on) { st.walk.on = false; st.walk.phase = 0; }
+        st.state = 'fly';
+        st.nextGestureAt = st.now + gap();   // 刚被甩过，别立刻自己找事做
+      },
+      flyVel(vx, vy) { st.fly.vx = num(vx, 0); st.fly.vy = num(vy, 0); },
+      // 撞墙：只记强度，衰减和形变在 tick 里做 —— 免得多一个定时器
+      bump(axis, power) {
+        const p = clamp(num(power, 0), 0, 1);
+        if (axis === 'y') st.fly.bumpY = Math.max(st.fly.bumpY, p);
+        else st.fly.bumpX = Math.max(st.fly.bumpX, p);
+      },
+      // speed = 结束时的速度（决定落地压扁的力度）
+      // land = 要不要播落地动作。半空中被抓住 / 窗口被隐藏时不播 ——
+      //   抓飞在半空的宠会先收到 drag-start（setDrag 接管悬垂姿态），紧跟着再收到
+      //   throw-end；这时如果播一段 600ms 的落地压扁，就会把"被拎在手里"的姿态顶掉。
+      endFly(speed, land) {
+        const f = st.fly;
+        f.on = false; f.bumpX = 0; f.bumpY = 0;
+        if (st.state === 'fly') st.state = 'idle';
+        if (land === false) return false;
+        const k = clamp(num(speed, 0) / 1400, 0.15, 1);
+        return api.play('land', { force: true, scale: 0.45 + k * 0.75 });
+      },
+      get flying() { return st.fly.on; },
+
       // ---- 调度：什么时候自己搞点事 ----
       noteInteraction() {
         st.nextGestureAt = st.now + gap();
@@ -381,15 +442,66 @@
           pose.dy -= clamp(Math.abs(d.vy) * 0.00002, 0, 0.012);
         }
 
-        // 4) 帧选择：动作指定 > 走动用侧身 > 待机正面
+        // 4) 抛飞：身体朝运动反方向后仰 + 沿运动方向拉长 + 撞墙压扁
+        //
+        // 为什么倾斜方向是"反方向"：被甩出去的东西，重心在后面、被推的部分在前面，
+        // 看起来就是"身体落在运动的后面"。和手里拎着甩（drag）用的是同一个符号。
+        if (st.fly.on) {
+          const f = st.fly, C = P.throw;
+          const sp = Math.hypot(f.vx, f.vy);
+
+          // 倾角：横向速度为主，纵向速度给一点点（往上下飞时"头朝那边偏"）
+          const rotT = clamp(-f.vx * C.leanPerPx, -C.leanMax, C.leanMax)
+                     + clamp(f.vy * C.leanPerPx * 0.25, -C.leanMax * 0.3, C.leanMax * 0.3);
+          f.rot += (rotT - f.rot) * C.leanEase;
+          pose.rot += f.rot;
+
+          // 风压：速度越快沿运动方向拉得越长。分轴施加，斜着飞时两个轴都有份。
+          const stretch = clamp(sp * C.stretchPerPx, 0, C.stretchMax);
+          if (sp > 1) {
+            const hx = Math.abs(f.vx) / sp, hy = Math.abs(f.vy) / sp;
+            pose.sx *= 1 + stretch * hx;
+            pose.sy *= 1 + stretch * hy;
+            // 拉长的那一轴拿去补另一轴，整只的体积才不会被"吹大"
+            pose.sx *= 1 - stretch * hy * 0.5;
+            pose.sy *= 1 - stretch * hx * 0.5;
+          }
+
+          // 撞墙：撞左右墙压横向、撞上下墙压纵向，然后按 bumpDecay 弹回来。
+          // 衰减放这里而不是在 bump() 里，是为了不额外开定时器 —— 每帧顺手乘一下。
+          f.bumpX *= C.bumpDecay;
+          f.bumpY *= C.bumpDecay;
+          if (f.bumpX > 0.01) { pose.sx *= 1 - f.bumpX * C.bumpSquash; pose.sy *= 1 + f.bumpX * C.bumpSquash * 0.8; }
+          if (f.bumpY > 0.01) { pose.sy *= 1 - f.bumpY * C.bumpSquash; pose.sx *= 1 + f.bumpY * C.bumpSquash * 0.8; }
+
+          // 头被风甩在后面（整只后仰时头再慢半拍，才不像一根棍子）
+          pose.headDx += clamp(-f.vx * C.headLag, -C.headLagMax, C.headLagMax);
+          pose.headDy += clamp(-f.vy * C.headLag * 0.5, -C.headLagMax * 0.5, C.headLagMax * 0.5);
+          pose.headRot += clamp(-f.rot * 0.35, -8, 8);
+        }
+
+        // 腾空感：起飞抬起来、落地压回去。用系数过渡而不是直接开关 ——
+        // airDy 是 0.012（约 3px），一帧内跳变在静止的小猴身上看得出来。
+        // 这一段故意放在 st.fly.on 外面：落地那一帧 on 已经变 false，但还得把空气感收回去。
+        {
+          const f = st.fly;
+          f.air += ((f.on ? 1 : 0) - f.air) * 0.2;
+          if (f.air > 0.002) pose.dy += P.throw.airDy * f.air;
+        }
+
+        // 5) 帧选择：动作指定 > 走动用侧身 > 待机正面
         let frame = pose.frame;
         if (!frame) {
           if (st.walk.on) frame = 'side';
           else frame = 'front';
         }
         if (st.state === 'drag' && !st.clip) frame = 'surprised';
+        // 飞得快的时候是"被甩懵了"的脸，快停下时松一口气（换回正面）
+        if (st.fly.on && !st.clip) {
+          frame = Math.hypot(st.fly.vx, st.fly.vy) > P.throw.calmSpeed ? 'surprised' : 'front';
+        }
 
-        // 5) 安全网：脚是地面接触点，任何把它推出窗口的下沉都不成立。
+        // 6) 安全网：脚是地面接触点，任何把它推出窗口的下沉都不成立。
         // 渲染层已经把整只动物上抬了 footRoom，所以 dy 一旦超过 footRoom，脚底
         // 就会跑到窗口外面被裁掉。动作表里已经没有一个动作下沉超过这个量，
         // 这条纯粹是防止以后新增动作时又把这条约束踩了。

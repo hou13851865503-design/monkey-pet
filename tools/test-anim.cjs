@@ -677,5 +677,100 @@ t('头部旋转的支点必须在头里面（切线以上），否则会把整�
     '旋转支点 x=' + g.spin[0] + ' 和脖子中线 ' + g.pivot[0] + ' 差太多，头会绕着耳朵转');
 });
 
+// ---------- 抛飞姿态 ----------
+// 物理在 flight.js（那边有独立单测），这里只管"被甩出去之后长什么样"。
+t('抛飞：后仰方向和运动方向相反，且被上限夹住', () => {
+  const a = PetAnim.create(profile);
+  a.startFly(2400, 0);
+  run(a, 400);
+  assert.strictEqual(a.state, 'fly');
+  assert.ok(a.pose.rot < -6, '往右飞应该向左后仰（负角度），实际 ' + a.pose.rot);
+  assert.ok(a.pose.rot >= -16.01, '后仰超过 leanMax：' + a.pose.rot);
+  assert.strictEqual(a.pose.frame, 'e_surprised', '飞得快时应该是惊讶脸');
+});
+
+t('抛飞：撞墙后速度反向，身体必须跟着换边后仰', () => {
+  // 这条正是"每帧下发速度"的理由：只给初速的话，撞完墙身体会继续朝旧方向后仰，
+  // 看起来像"贴着墙往回飘的纸片"，而不是"撞回来了"。
+  const a = PetAnim.create(profile);
+  a.startFly(2200, 0);
+  run(a, 500);
+  const before = a.pose.rot;
+  a.flyVel(-2200, 0);
+  run(a, 600);
+  const after = a.pose.rot;
+  assert.ok(before < -6, '起飞时没后仰：' + before);
+  assert.ok(after > 6, '撞墙反向后没有换边后仰：' + after);
+});
+
+t('抛飞：撞左右墙压横向、撞上下墙压纵向，之后会弹回来', () => {
+  const a = PetAnim.create(profile);
+  a.startFly(1400, 0);
+  run(a, 200);
+  a.bump('x', 1);
+  a.tick(16);
+  assert.ok(a.pose.sx < 0.95, '撞左右墙应压扁横向，实际 sx=' + a.pose.sx);
+  assert.ok(a.pose.sy > 1, '压扁横向时纵向应回弹，实际 sy=' + a.pose.sy);
+  run(a, 400);
+  assert.ok(a.pose.sx > 0.98, '撞击形变没有衰减掉，sx=' + a.pose.sx);
+
+  const b = PetAnim.create(profile);
+  b.startFly(0, 1400);
+  run(b, 200);
+  b.bump('y', 1);
+  b.tick(16);
+  assert.ok(b.pose.sy < 0.97, '撞上下墙应压扁纵向，实际 sy=' + b.pose.sy);
+});
+
+t('抛飞：腾空时整只抬起来，落地后回到地面', () => {
+  const a = PetAnim.create(profile);
+  a.startFly(900, 0);
+  run(a, 300);
+  assert.ok(a.pose.dy < -0.005, '飞行中没有腾空：dy=' + a.pose.dy);
+  a.endFly(120);
+  run(a, 600);
+  assert.ok(a.pose.dy > -0.002, '落地后还悬空：dy=' + a.pose.dy);
+});
+
+t('抛飞：脚不许被推出窗口（dy 仍受 footRoom 约束）', () => {
+  const a = PetAnim.create(profile);
+  a.startFly(1800, 1800);
+  for (let i = 0; i < 60; i++) {
+    a.tick(16);
+    assert.ok(a.pose.dy <= a.profile.footRoom + 1e-9,
+      '第 ' + i + ' 帧 dy=' + a.pose.dy + ' 超过 footRoom');
+  }
+});
+
+t('抛飞结束：回到 idle 并播一次落地压扁', () => {
+  const a = PetAnim.create(profile);
+  a.startFly(1200, 0);
+  run(a, 300);
+  a.endFly(300);
+  assert.strictEqual(a.flying, false, 'endFly 之后还在飞');
+  assert.strictEqual(a.clipId, 'land', '没有播落地动作');
+  run(a, 1200);
+  assert.strictEqual(a.state, 'idle');
+});
+
+t('抛飞期间不许自主动作抢画面', () => {
+  const a = PetAnim.create(profile);
+  a.startFly(1500, 0);
+  for (let i = 0; i < 40; i++) {
+    a.tick(16);
+    assert.strictEqual(a.maybeGesture(), '', '飞行中播了自主动作');
+  }
+});
+
+t('抛飞：慢下来之后换回正面（一直挂惊讶脸会像卡住了）', () => {
+  const a = PetAnim.create(profile);
+  a.startFly(1500, 0);
+  run(a, 300);
+  assert.strictEqual(a.pose.frame, 'e_surprised');
+  a.flyVel(80, 0);
+  run(a, 100);
+  assert.strictEqual(a.pose.frame, 'd0', '速度掉下来后应回到正面帧');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

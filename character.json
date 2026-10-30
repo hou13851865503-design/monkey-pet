@@ -79,6 +79,35 @@
     "comment": "gap=两个动作之间的静默间隔（这段时间只允许待机和转头，和 dsh-pet 的做法一致）；cooldown=同一个动作多久内不重复"
   },
 
+  "_throwComment": "甩动 / 抛飞。分成两半是因为它们的改动节奏完全不同：\nphysics 决定「甩出去之后怎么飞」（主进程每帧调 flight.step，tools/test-flight.cjs 钉住不变式：不出界、一定停、撞得对）；\npose 决定「被甩的时候长什么样」（渲染层每帧读，只能靠肉眼调）。\n\nphysics.damping=空气阻力（每秒衰减率），restitution=撞墙保留多少法向速度，wallFriction=撞墙时切向的损失（贴着墙飞会减速），\nstopSpeed=低于多少 px/s 就判定停下（px/s），maxSpeed=抛出速度上限，minThrow=低于多少不算「甩」（只算「放下」），\nmaxFlight=单次飞行时长上限（毫秒兜底），substepPx=物理分步的位移上限（决定穿不穿墙，别调大）。\n换形象要重量的是 minThrow 和 stopSpeed：它们都跟窗口尺寸挂钩，窗口越小越该按比例调小。\n\npose.leanPerPx=每 px/s 横向速度带来的后仰角度；stretchPerPx=沿运动方向的拉伸；bumpSquash=撞墙压扁强度；\nairDy=腾空时整只上抬的比例（负值 = 往上）。",
+  "throw": {
+    "physics": {
+      "damping": 1.05,
+      "restitution": 0.74,
+      "wallFriction": 0.94,
+      "stopSpeed": 110,
+      "maxSpeed": 3200,
+      "minThrow": 1000,
+      "bumpRef": 2200,
+      "maxFlight": 9000,
+      "maxStep": 50,
+      "substepPx": 6
+    },
+    "pose": {
+      "leanPerPx": 0.01,
+      "leanMax": 16,
+      "leanEase": 0.22,
+      "stretchPerPx": 0.000032,
+      "stretchMax": 0.075,
+      "bumpSquash": 0.22,
+      "bumpDecay": 0.8,
+      "headLag": 0.00004,
+      "headLagMax": 0.03,
+      "calmSpeed": 700,
+      "airDy": -0.012
+    }
+  },
+
   "clips": [
     {
       "id": "lookAround",

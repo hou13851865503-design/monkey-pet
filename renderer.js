@@ -244,10 +244,10 @@
     }
   }
 
-  // 只有"走动 / 拖拽 / 播动作"这三件事由引擎决定帧和镜像；
+  // 只有"走动 / 拖拽 / 抛飞 / 播动作"这几件事由引擎决定帧和镜像；
   // 其余时间（待机）还是按鼠标朝向选帧，保持原有手感。
   function animOwnsFrame() {
-    return anim.walking || anim.state === 'drag' || !!anim.clipId;
+    return anim.walking || anim.state === 'drag' || anim.state === 'fly' || !!anim.clipId;
   }
   function applyAnimFrame(pose) {
     if (!animOwnsFrame()) return;
@@ -283,12 +283,19 @@
   // 引擎的状态变化同步到渲染层状态机：走完/播完都要回到待机，否则朝向会卡住
   let animPhase = '';
   function syncAnimState() {
-    const cur = anim.walking ? 'walk' : (anim.clipId ? 'gesture' : 'idle');
+    // fly 也在这里收口：主进程那边可能因为"被抓住 / 窗口隐藏 / 出错"提前收手，
+    // 那条路不一定发 throw-end。引擎的 flying 才是唯一真相。
+    if (!anim.flying && animPhase === 'fly') {
+      animPhase = '';
+      if (state === 'fly') enter(focusing ? 'focus' : 'idle');
+    }
+    const cur = anim.walking ? 'walk' : (anim.clipId ? 'gesture' : (anim.flying ? 'fly' : 'idle'));
     if (cur === animPhase) return;
     const prev = animPhase;
     animPhase = cur;
     if (cur === 'walk') state = 'walk';
     else if (cur === 'gesture') state = 'gesture';
+    else if (cur === 'fly') state = 'fly';
     else if (prev === 'walk' || prev === 'gesture') {
       enter(focusing ? 'focus' : 'idle');
       try { if (ipc && ipc.refreshFacing) ipc.refreshFacing(); } catch (_) {}
@@ -342,7 +349,9 @@
     state = s;
     document.body.classList.toggle('dragging', s === 'drag');
     if (s !== 'idle') document.body.classList.remove('faceLeft');  // 情绪/拖拽帧不镜像
-    if (isDizzy() && s !== 'idle') return;   // 眩晕期间保持晕脸，不被切走
+    // 眩晕期间保持晕脸，不被切走 —— 但"被甩出去"是例外：甩晕和飞行是同一件事的
+    // 前后两段，这时候拦下来就是"人已经飞了，脸还停在原地"。
+    if (isDizzy() && s !== 'idle' && s !== 'fly') return;
     if (s === 'idle') {
       showDirection();
       // 让主进程按"当前真实光标"重算一次，避免沿用过期朝向（鼠标停着不动时尤其明显）
@@ -350,6 +359,7 @@
     }
     else if (s === 'sleepy') show('e_sleepy');
     else if (s === 'drag') show('e_surprised');
+    else if (s === 'fly') show('e_surprised');
     else if (s === 'focus') show('e_thinking');
     syncLock();
   }
@@ -664,6 +674,28 @@
     if (ipc.onDragVel) ipc.onDragVel((vx, vy) => anim.dragVel(vx, vy));
     // 松手落地：竖直速度决定压扁强度
     if (ipc.onLand) ipc.onLand((vy) => anim.endDrag(vy));
+
+    // ---- 甩出去：牵引 -> 松手 -> 惯性飞行 -> 撞墙反弹 ----
+    // 姿态全在引擎里算（后仰 / 拉伸 / 撞击压扁），这里只负责把四个信号转进去，
+    // 以及真落地之后把渲染层的状态机叫醒 —— 少一个信号画面就会卡在"永远在飞"。
+    if (ipc.onThrow) {
+      ipc.onThrow((vx, vy) => {
+        enter('fly');
+        anim.startFly(vx, vy);
+      });
+    }
+    if (ipc.onThrowVel) ipc.onThrowVel((vx, vy) => anim.flyVel(vx, vy));
+    if (ipc.onBump) ipc.onBump((axis, power) => anim.bump(axis, power));
+    if (ipc.onThrowEnd) {
+      ipc.onThrowEnd((reason, speed, bounces) => {
+        // 只有"自己飞累了落地"才压扁。半空被抓住（grab）/ 窗口被隐藏（hide）都不播，
+        // 否则那段落地动作会把"被拎在手里"的悬垂姿态顶掉 —— 抓过来的是一只会砸地的猴。
+        anim.endFly(speed, reason === 'stop');
+        if (state === 'fly' && reason === 'stop') enter(focusing ? 'focus' : 'idle');
+        // 撞得够狠就吐个星星眼 —— 被扔了一圈之后的固定反馈
+        if (reason === 'stop' && bounces >= 3) setDizzy(Math.min(1800, 500 + bounces * 180));
+      });
+    }
 
     // 右键菜单里手点某个动作
     if (ipc.onGesture) {

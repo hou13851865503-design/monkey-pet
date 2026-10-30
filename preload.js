@@ -24,6 +24,16 @@ contextBridge.exposeInMainWorld('pet', {
   onDragVel: (cb) => ipcRenderer.on('drag-vel', (_e, vx, vy) => cb(vx, vy)),
   onLand: (cb) => ipcRenderer.on('land', (_e, vy) => cb(vy)),
 
+  // ---------- 甩出去之后 ----------
+  // throw     = 松手瞬间（初速）
+  // throw-vel = 飞行中每帧的速度（身体倾斜 / 拉伸都靠它）
+  // bump      = 撞墙（axis 'x'|'y'，power 0..1）
+  // throw-end = 结束（reason: stop | grab | hide，最后一个参数是撞墙次数）
+  onThrow: (cb) => ipcRenderer.on('throw', (_e, vx, vy) => cb(vx, vy)),
+  onThrowVel: (cb) => ipcRenderer.on('throw-vel', (_e, vx, vy) => cb(vx, vy)),
+  onBump: (cb) => ipcRenderer.on('bump', (_e, axis, power) => cb(axis, power)),
+  onThrowEnd: (cb) => ipcRenderer.on('throw-end', (_e, reason, speed, bounces) => cb(reason, speed, bounces)),
+
   // ---------- 菜单里手动指定动作 ----------
   onGesture: (cb) => ipcRenderer.on('play-gesture', (_e, id) => cb(id)),
 
