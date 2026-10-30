@@ -18,7 +18,10 @@
 输出（窗口比例，直接抄进 character.json）：
     headCut   = 该行的纵向比例
     headPivot = [该行最窄处的横向中心, 该行再往下一小段]
-                支点放在切线**下方**：这样"头缩一下"是朝脖子压，切线上不会有缝。
+                位移/缩放的支点，放在切线**下方**：这样"头缩一下"是朝脖子压，
+                切线上不会有缝。
+    headSpin  = 头心的位置（切线以上那半截的包围盒中心）
+                旋转支点。必须绕头心转，绕脖子转会让整个头平移出去。
 
 依赖：Pillow（pip install pillow）
 """
@@ -86,6 +89,14 @@ def main():
     cut = cut_y / h
     pivot_y = min(0.98, cut + PIVOT_DROP)
 
+    # 旋转支点 = 头心的包围盒中心。为什么不用脖子做旋转支点：绕脖子转会让整个
+    # 头的轮廓平移出去，转过的和没转过的两条轮廓叠起来，看着像"头变宽了"。
+    head_rows = [r for r in rows if r[0] <= cut_y]
+    hy0, hy1 = head_rows[0][0], head_rows[-1][0]
+    hx0 = min(r[1] for r in head_rows)
+    hx1 = max(r[2] for r in head_rows)
+    spin = ((hx0 + hx1) / 2.0 / w, (hy0 + hy1) / 2.0 / h)
+
     print('图        %dx%d' % (w, h))
     print('脖子那一行 y=%.0f (~%.3f)，宽 %d px = %.3f 窗宽' % (cut_y, cut, best_w, best_w / w))
     print('支点横向 x=%.3f（脖子中线）' % cx)
@@ -93,6 +104,7 @@ def main():
     print('抄进 character.json 的 anchors：')
     print('  "headCut": %.3f,' % cut)
     print('  "headPivot": [%.3f, %.3f],' % (cx, pivot_y))
+    print('  "headSpin": [%.3f, %.3f],' % spin)
 
     # 合理性检查：脖子必须明显窄于头顶最宽处，否则说明这张图没有脖子
     widest = max(width(r) for r in rows)
@@ -117,6 +129,7 @@ def main():
             doc = json.load(f)
         doc.setdefault('anchors', {})['headCut'] = round(cut, 4)
         doc['anchors']['headPivot'] = [round(cx, 4), round(pivot_y, 4)]
+        doc['anchors']['headSpin'] = [round(spin[0], 4), round(spin[1], 4)]
         with open(args.out, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(doc, f, ensure_ascii=False, indent=2)
             f.write('\n')

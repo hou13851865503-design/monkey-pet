@@ -70,9 +70,10 @@
     // 找轮廓宽度最小的那一行，就是下巴和肩膀之间的脖子。
     p.headGeom = {
       cut: clamp(num(p.anchors.headCut, 0.645), 0.15, 0.95),
-      pivot: Array.isArray(p.anchors.headPivot) && p.anchors.headPivot.length === 2
-        ? [clamp(num(p.anchors.headPivot[0], 0.5), 0, 1), clamp(num(p.anchors.headPivot[1], 0.66), 0, 1)]
-        : [0.5, 0.66],
+      // pivot = 位移/缩放支点（脖子下方）；spin = 旋转支点（头心）
+      // 分开的原因见 index.html：#headSpin 绕头心转，轮廓才不会被平移出去
+      pivot: pair(p.anchors.headPivot, 0.5, 0.66),
+      spin: pair(p.anchors.headSpin, 0.5, 0.36),
     };
 
     // 帧名解析：先查 emotions（cheer/shy…），再查顶层（front/side/turnA…）
@@ -99,6 +100,11 @@
     return p;
   }
   function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+  function pair(v, dx, dy) {
+    return Array.isArray(v) && v.length === 2
+      ? [clamp(num(v[0], dx), 0, 1), clamp(num(v[1], dy), 0, 1)]
+      : [dx, dy];
+  }
 
   // ---------- 关键帧采样 ----------
   // 只插值关键帧里出现过的通道：没写的通道保持中性，于是"只改一个通道"的动作

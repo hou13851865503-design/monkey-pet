@@ -17,6 +17,7 @@
   const gaitEl = document.getElementById('gait');
   const breath = document.getElementById('breath');
   const headEl = document.getElementById('head');
+  const headSpin = document.getElementById('headSpin');
   const headImg = headEl ? headEl.querySelector('img') : null;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const ipc = window.pet || null;
@@ -52,7 +53,11 @@
     .forEach((n) => addFrame('e_' + n, `./assets/emotion_${n}.png`));
 
   let current = null;
-  function show(key) {
+  let frozenPose = null;   // 仅测试用：非 null 时主循环只贴这一帧（见 __petStrip）
+  function show(key, force) {
+    // 定格取帧期间禁止别的代码换帧：朝向跟随、眨眼、情绪定时器都还在跑，
+    // 它们会把定格的那一帧顶掉（对比图里就会混进侧脸和眯眼）。
+    if (frozenPose && force !== true) return;
     if (key === current) return;
     if (current && imgs[current]) imgs[current].classList.remove('active');
     if (imgs[key]) imgs[key].classList.add('active');
@@ -197,6 +202,9 @@
     st.setProperty('--head-cut', (g.cut * 100).toFixed(2) + '%');
     st.setProperty('--head-px', (g.pivot[0] * 100).toFixed(2) + '%');
     st.setProperty('--head-py', (g.pivot[1] * 100).toFixed(2) + '%');
+    // 旋转支点单独一个：绕头心转才不会让整个头的轮廓平移出去（见 index.html 的注释）
+    st.setProperty('--head-spx', (g.spin[0] * 100).toFixed(2) + '%');
+    st.setProperty('--head-spy', (g.spin[1] * 100).toFixed(2) + '%');
     st.setProperty('--head-feather', ((profile.anchors && profile.anchors.headFeather) || 0.032) * 100 + '%');
   })();
 
@@ -219,10 +227,11 @@
       if (on) {
         headEl.style.transform =
           'translate(' + (hx * 100).toFixed(3) + '%, ' + (hy * 100).toFixed(3) + '%)' +
-          ' rotate(' + hr.toFixed(2) + 'deg)' +
           ' scale(' + hsx.toFixed(4) + ', ' + hsy.toFixed(4) + ')';
-      } else if (headEl.style.transform) {
-        headEl.style.transform = '';
+        if (headSpin) headSpin.style.transform = 'rotate(' + hr.toFixed(2) + 'deg)';
+      } else {
+        if (headEl.style.transform) headEl.style.transform = '';
+        if (headSpin && headSpin.style.transform) headSpin.style.transform = '';
       }
       document.body.classList.toggle('head-on', on);
     }
@@ -248,7 +257,6 @@
   // 为什么需要：按时间采样截图的时机永远对不准。"抖一抖"0.9 秒抖 7 个来回，
   // 截图一张要几十毫秒，采到的相位完全随机 —— 有时正好全落在过零点，看起来
   // 就"根本没动"。这个钩子直接把动作按归一化时间 t 定格，想要哪一帧给哪一帧。
-  let frozenPose = null;
   window.__petStrip = function (id, t) {
     const def = anim.profile.clipById[id];
     if (!def) return false;
@@ -261,7 +269,7 @@
       facing: 0, state: 'gesture',
     };
     applyPose(frozenPose);
-    show(frozenPose.frame);
+    show(frozenPose.frame, true);
     return true;
   };
 

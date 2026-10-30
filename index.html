@@ -84,6 +84,16 @@
         transparent calc(var(--head-cut, 65.2%) + 1%));
     }
     body.head-on #head { opacity: 1; }
+    /* 两层是有原因的：
+       - #head  负责「位移 + 缩放」，支点在脖子上 → 头缩一下就是头朝脖子压下去（点头）
+       - #headSpin 负责「旋转」，支点在**头心** → 绕自己转，轮廓不变形
+       如果旋转也绕脖子转，整个头的轮廓会跟着平移出去约 18px，两条轮廓
+       （转过的 + 没转过的）叠起来看，头就像"变宽了一圈"，而不是"歪了一下"。
+       绕头心转则圆形轮廓几乎不动，只有耳朵和呆毛在转 —— 那才像歪头。 */
+    #headSpin {
+      position: absolute; inset: 0;
+      transform-origin: var(--head-spx, 50%) var(--head-spy, 36%);
+    }
     #head img {
       position: absolute; inset: 0;
       width: 100%; height: 100%;
@@ -376,7 +386,7 @@
       </svg>
     </div>
     <div id="tilt"><div id="gait"><div id="pose"><div id="lean"><div id="breath">
-      <div id="head"><img alt="" /></div>
+      <div id="head"><div id="headSpin"><img alt="" /></div></div>
       <div id="eyes"></div>
       <div id="cig"><i></i></div>
       <div id="bottle"><i></i></div>

@@ -2102,7 +2102,7 @@ async function testStrip() {
       const r = await win.webContents.executeJavaScript(
         'window.__petStrip(' + JSON.stringify(id) + ', ' + ts[i] + ')');
       if (!r) break;
-      await sleep(140);   // 等切帧的透明度过渡走完（.f 是 .24s 交叉淡入）
+      await sleep(300);   // 等切帧的透明度过渡走完（.f 是 .24s 交叉淡入）
       const img = await win.webContents.capturePage();
       fs.writeFileSync(out + '_' + id + '_' + i + '.png', img.toPNG());
       ok++;

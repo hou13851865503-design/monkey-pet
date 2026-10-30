@@ -630,5 +630,17 @@ t('头层支点横向要落在脖子的中线附近（不然头会绕着耳朵�
     '支点 x=' + g.pivot[0] + ' 偏离中线太多');
 });
 
+t('头部旋转的支点必须在头里面（切线以上），否则会把整个头平移出去', () => {
+  const g = PetAnim.normalize(profile).headGeom;
+  // 这是踩过的坑：一开始旋转也绕脖子（pivot），结果头转 11° 时整个轮廓平移 18px，
+  // 转过的和没转过的两条轮廓叠在一起，看着像"头变宽了一圈"而不是"歪了一下"。
+  // 绕头心转则圆形轮廓几乎不动，只有耳朵和呆毛在转。
+  assert.ok(g.spin[1] < g.cut - 0.1,
+    '旋转支点 y=' + g.spin[1] + ' 离切线 ' + g.cut + ' 太近，几乎等于绕脖子转');
+  assert.ok(g.spin[1] > 0.15, '旋转支点 y=' + g.spin[1] + ' 跑到头顶外面了');
+  assert.ok(Math.abs(g.spin[0] - g.pivot[0]) < 0.12,
+    '旋转支点 x=' + g.spin[0] + ' 和脖子中线 ' + g.pivot[0] + ' 差太多，头会绕着耳朵转');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

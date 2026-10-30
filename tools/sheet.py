@@ -52,8 +52,11 @@ def main():
     cols = max(len(r[1]) for r in rows)
     pad = 6
     sheet = Image.new('RGB', (cols * (cw + pad) + pad, len(rows) * (ch + pad + 18) + pad), (250, 250, 250))
+    from PIL import ImageDraw
+    d = ImageDraw.Draw(sheet)
     for ri, (cid, imgs) in enumerate(rows):
         top = pad + ri * (ch + pad + 18) + 18
+        d.text((pad, top - 15), cid, fill=(60, 60, 60))
         for ci, im in enumerate(imgs):
             bg = checker(cw, ch)
             bg.paste(im, (0, 0), im)
