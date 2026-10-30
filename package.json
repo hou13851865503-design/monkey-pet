@@ -6,8 +6,10 @@
   "scripts": {
     "start": "node launcher.js",
     "dist": "electron-builder",
-    "test": "node tools/test-anim.cjs && node tools/test-flight.cjs && node tools/test-wb.cjs && node tools/test-paper.cjs && node tools/test-daily.cjs",
-    "test:live": "node tools/test-wb-live.cjs"
+    "test": "node tools/test-anim.cjs && node tools/test-flight.cjs && node tools/test-bottle.cjs && node tools/test-wb.cjs && node tools/test-paper.cjs && node tools/test-daily.cjs",
+    "lab": "electron tools/bottle-lab.js --states=drinking:0,sip:0.22,sip:0.46,sip-deep:0.9 --out=_shots/lab/bottle.png",
+    "test:live": "node tools/test-wb-live.cjs",
+    "test:bottle": "node tools/test-bottle.cjs"
   },
   "author": "",
   "license": "MIT",

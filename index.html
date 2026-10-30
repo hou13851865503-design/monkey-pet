@@ -19,6 +19,24 @@
     }
     #stage:active { cursor: grabbing; }
 
+    /* ---- 可插值的自定义属性（酒瓶用）----
+       默认情况下自定义属性是"离散"的：写 transition 也只会在中间某一刻硬跳。
+       用 @property 注册成具体类型之后，它们才会像普通属性一样逐帧插值。
+       酒瓶离不开这一条：液面要始终保持水平，就得反向补偿瓶身角度，
+       而"补偿用的角度"必须是正在动画中的那个角度，不能是终点值。 */
+    @property --tilt  { syntax: '<angle>';      inherits: true;  initial-value: 12deg; }
+    /* 仰头角（#lean 那一层的自转）。酒液要读出**正在动画中的**这一层角度，
+       才能把它一起补偿掉 —— 所以它必须是个注册过的变量，而不是写死的 transform。 */
+    @property --leanA { syntax: '<angle>';      inherits: true;  initial-value: 0deg; }
+    @property --leanY { syntax: '<percentage>'; inherits: true;  initial-value: 0%; }
+    @property --leanS { syntax: '<number>';     inherits: true;  initial-value: 1; }
+    @property --slosh { syntax: '<angle>';      inherits: false; initial-value: 0deg; }
+    @property --pour  { syntax: '<number>';     inherits: true;  initial-value: 0; }
+    @property --dy    { syntax: '<percentage>'; inherits: true;  initial-value: 5%; }
+    @property --sip   { syntax: '<number>';     inherits: true;  initial-value: 0; }
+    /* 酒量变化用"一仰脖吞下去"的速度，不是液面匀速滑落 */
+    body { transition: --sip .7s ease; }
+
     /* 伪 3D 透视倾斜层（JS 每帧更新 transform） */
     #tilt { position: absolute; inset: 0; will-change: transform; }
 
@@ -36,15 +54,24 @@
     #pose { position: absolute; inset: 0; transform-origin: 50% 94%; will-change: transform; }
 
     /* 前倾/仰头层：仰头灌酒、吐烟仰头、呼气下沉。用 transition 而非 animation，
-       所以"举瓶—仰头—放下"是一条连续的缓动曲线，不是硬切 */
+       所以"举瓶—仰头—放下"是一条连续的缓动曲线，不是硬切。
+
+       角度/位移/压缩都走变量，而不是各自写死一条 transform —— 因为酒液在**下一层**，
+       它要把这一层的自转补偿掉（液面只认重力）。变量会随过渡逐帧更新并向下继承，
+       写死的 transform 则只有终点值，液面就会"跟着头一起歪"。
+       顺序固定为 rotate → translateY → scaleY，和原来三条规则各自的顺序保持一致。 */
     #lean {
       position: absolute; inset: 0;
       transform-origin: 50% 96%;
-      transition: transform .85s cubic-bezier(.3, .84, .35, 1);
+      --leanA: 0deg; --leanY: 0%; --leanS: 1;
+      transform: rotate(var(--leanA)) translateY(var(--leanY)) scaleY(var(--leanS));
+      transition: --leanA .85s cubic-bezier(.3, .84, .35, 1),
+                  --leanY .85s cubic-bezier(.3, .84, .35, 1),
+                  --leanS .85s cubic-bezier(.3, .84, .35, 1);
     }
-    body.sip      #lean { transform: rotate(-6.5deg) translateY(1.4%); }   /* 仰头灌 */
-    body.tiltback #lean { transform: rotate(-3.2deg) translateY(.5%); }    /* 吐烟轻仰 */
-    body.slump    #lean { transform: translateY(1.7%) scaleY(.98); }       /* 呼气下沉 */
+    body.sip      #lean { --leanA: -6.5deg; --leanY: 1.4%; }   /* 仰头灌 */
+    body.tiltback #lean { --leanA: -3.2deg; --leanY: .5%; }    /* 吐烟轻仰 */
+    body.slump    #lean { --leanY: 1.7%; --leanS: .98; }       /* 呼气下沉 */
 
     /* 呼吸动画层 */
     #breath {
@@ -236,43 +263,135 @@
     }
     body.ash-tap #cig i { opacity: 0; transform: translate(14%, 26%) scale(.8); }
 
-    /* 酒瓶：支点放在**瓶口**（嘴巴），所以"举瓶"是绕着嘴翻上去，
-       而不是整只瓶子从别处平移过来 —— 这是它看起来不违和的关键。
-       锚点 = e_sleepy 那张脸的嘴（喝酒全程只用这一张脸）。
-       结构：::after=瓶颈(0~24%)，::before=瓶身(24~100%)，i=酒液 */
+    /* ---- 酒瓶 ----
+       支点放在**瓶口**（嘴巴），所以"举瓶"是绕着嘴翻上去，而不是整只瓶子从别处
+       平移过来 —— 这是它看起来不违和的关键。锚点 = e_sleepy 那张脸的嘴
+       （喝酒全程只用这一张脸）。
+
+       三条真实感规则，缺一条就会显得假：
+
+       ① **液面永远水平**。原来酒液是瓶子的一部分，跟着瓶子一起转 —— 举到 -138°
+          时酒全"浮"在翘起来的瓶底那头，瓶口这边反而是空的，看着像在喝空气。
+          现在酒液按 -(瓶身倾角 + 身体仰头角) 反向转回来：真实液面只认重力，
+          不认容器。
+       ② **酒往低处流**。液面水平之后"灌满哪一半"是自动的：瓶子朝下时酒积在瓶口
+          （同时瓶颈里也得有酒，否则等于瓶口在空气中倒酒），瓶身空的是翘起来那端。
+          所以液面位置要跟着倾倒程度在两套刻度之间过渡（--pour，见下）。
+       ③ **越喝越少、越喝越仰**。每吞一口液面掉一格，最后一口还要把瓶底竖得更高
+          才够得着（body.sip-deep）。
+
+       结构（顺序 = 绘制顺序）：
+         .bt-body  瓶身玻璃，overflow:hidden 顺便当酒液的裁切框
+           .bt-liq 酒液（反向旋转，液面就是它的上边缘）
+         .bt-neck  瓶颈玻璃
+           .bt-nliq 瓶颈里的酒 —— 瓶口是整瓶最低点，所以倾斜时那儿一定有酒
+         .bt-sheen 玻璃高光，压在酒上面（否则酒看着像贴在瓶子外面的色块）
+         .bt-cap   瓶口：暗色开口 + 一圈玻璃唇 */
     #bottle {
       left: 53%; top: 65%;
       width: 9%; height: 19%;
       transform-origin: 50% 0;
-      /* 闲置时整瓶往下降一点，瓶口离开嘴唇（不然像长在下唇上） */
-      transform: translate(-50%, 5%) rotate(12deg);
+      /* 闲置时整瓶往下降一点，瓶口离开嘴唇（不然像长在下唇上）。
+         --leanA 刻意**不在这里声明**：它得从 #lean 继承下来，
+         这里一写就把祖先那层正在动画中的值盖掉了，液面立刻跟着头歪。 */
+      --tilt: 12deg; --pour: 0; --dy: 5%;
+      transform: translate(-50%, var(--dy)) rotate(var(--tilt));
       z-index: 6;
-      transition: transform 1.15s cubic-bezier(.33, .86, .36, 1), opacity .18s ease;
+      /* 角度全部走**变量**过渡：瓶身和酒液读的是同一个 --tilt，
+         所以"瓶身转到哪、液面就补偿到哪"在物理上不可能不同步。
+         如果两边各写一条 transform transition，只要缓动曲线差一点，
+         转的过程中液面就会歪着晃 —— 那比不补偿更假。 */
+      transition: --tilt 1.15s cubic-bezier(.33, .86, .36, 1),
+                  --pour 1.1s cubic-bezier(.33, .86, .36, 1),
+                  --dy 1.15s cubic-bezier(.33, .86, .36, 1),
+                  opacity .18s ease;
     }
     body.drinking #bottle { opacity: 1; }
-    /* 仰灌：绕瓶口翻转 138°，瓶底翘向右上方（液体正好压到瓶口） */
-    body.sip #bottle { transform: translate(-50%, -1%) rotate(-138deg); }
-    #bottle::before {
-      content: ''; position: absolute; top: 24%; left: 0;
-      width: 100%; height: 76%;
-      background: linear-gradient(100deg, rgba(216, 228, 216, .95) 0 20%, rgba(166, 184, 166, .92) 20% 100%);
-      border-radius: 2px 2px 5px 5px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, .42), inset -1px 0 2px rgba(255, 255, 255, .35);
+    /* 仰灌：绕瓶口翻转 138°（比水平多转 48°），瓶底翘向右上方 */
+    body.sip #bottle { --tilt: -138deg; --pour: 1; --dy: -1%; }
+    /* 最后一口：见底了，得把瓶底竖得更高 */
+    body.sip-deep #bottle { --tilt: -152deg; }
+
+    .bt-body {
+      position: absolute; left: 0; top: 24%; width: 100%; height: 76%;
+      overflow: hidden;                 /* 酒液的裁切框：倒出来也不会流到瓶外 */
+      border-radius: 3px 3px 7px 7px;
+      background: linear-gradient(100deg,
+        rgba(228, 240, 232, .62) 0 15%,
+        rgba(196, 214, 202, .46) 15% 44%,
+        rgba(150, 174, 158, .52) 44% 100%);
+      box-shadow: inset -2px 0 3px rgba(255, 255, 255, .5),
+                  inset 2px 0 3px rgba(64, 84, 72, .28),
+                  0 1px 3px rgba(0, 0, 0, .42);
     }
-    #bottle::after {
-      content: ''; position: absolute; top: 0; left: 32%;
-      width: 36%; height: 26%;
-      background: linear-gradient(100deg, #d7e3d7 0 30%, #aebfae 30% 100%);
+    .bt-liq {
+      position: absolute;
+      /* 比瓶子大一圈：转起来之后仍要盖满瓶身（多出来的部分被 .bt-body 裁掉） */
+      left: -160%; width: 420%; height: 500%;
+      /* 液面位置：.bt-body 顶边为 0。
+         直立时酒在**低处**（瓶底那半），倾到时在**瓶口**那半，
+         两套刻度正好互补，所以按 --pour 线性过渡：
+           --pour=0 → var(--sip)        （直着放：喝掉多少，空出上面多少）
+           --pour=1 → 1 - var(--sip)    （倒过来：喝掉多少，瓶口这头就剩多少） */
+      top: calc((var(--sip) + (1 - 2 * var(--sip)) * var(--pour)) * 100%);
+      transform-origin: 50% 0;          /* 支点落在液面上：怎么晃，液面都过这一点 */
+      /* 反着转回去的是**两层**的自转：瓶身倾角 --tilt + 仰头角 --leanA。
+         两者都是注册过的 <angle>，都在各自的层上逐帧插值，然后被继承到这里，
+         所以世界坐标里液面恒为 0° —— 瓶身和头转到哪，液面就补到哪。
+         --slosh 是刻意的例外：咕咚的时候允许它歪一下再回正。 */
+      transform: rotate(calc(-1 * var(--tilt) - var(--leanA, 0deg) + var(--slosh, 0deg)));
+      background: linear-gradient(180deg,
+        rgba(233, 172, 78, .96) 0,
+        rgba(190, 121, 40, .97) 2.5%,
+        rgba(126, 68, 18, .98) 9%,
+        rgba(88, 44, 10, .98) 100%);
+      border-top: 1px solid rgba(255, 228, 160, .8);   /* 液面那道亮边（弯月面） */
+      box-shadow: 0 -1px 2px rgba(255, 212, 138, .5);
+    }
+    .bt-neck {
+      position: absolute; left: 32%; top: 0; width: 36%; height: 26%;
+      overflow: hidden;
+      background: linear-gradient(100deg,
+        rgba(234, 244, 236, .66) 0 32%,
+        rgba(174, 194, 180, .58) 32% 100%);
       border-radius: 1px;
-      box-shadow: inset -1px 0 1px rgba(255, 255, 255, .4);
+      box-shadow: inset -1px 0 1px rgba(255, 255, 255, .55),
+                  inset 1px 0 1px rgba(64, 84, 72, .3);
     }
-    #bottle i {
-      position: absolute; left: 8%; bottom: 3%; width: 84%;
-      height: calc((1 - var(--sip, 0)) * 72%);
-      border-radius: 0 0 4px 4px;
-      background: linear-gradient(#c08a33, #8a5a1c);
-      transition: height 1.1s ease;
+    /* 瓶颈里的酒：倾斜时从**瓶口**那头灌进来，再往瓶身里涨。
+       clip-path 从"只剩顶上一条"过渡到"全满"，读起来就是酒先到嘴边、再退回瓶里。 */
+    .bt-nliq {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, #b8742a 0, #7d4513 100%);
+      clip-path: inset(0 0 100% 0);
+      transition: clip-path 1.15s cubic-bezier(.33, .86, .36, 1);
     }
+    body.sip .bt-nliq { clip-path: inset(0 0 0 0); }
+
+    .bt-sheen {
+      position: absolute; left: 9%; top: 27%; width: 19%; height: 66%;
+      border-radius: 1px;
+      background: linear-gradient(180deg,
+        rgba(255, 255, 255, .68), rgba(255, 255, 255, .1) 52%, rgba(255, 255, 255, .46));
+      opacity: .85;
+    }
+    .bt-cap {
+      position: absolute; left: 30%; top: -2%; width: 40%; height: 5%;
+      border-radius: 50%;
+      background: radial-gradient(ellipse at 50% 45%, #5e3410 0 42%, #d3e0d4 62% 100%);
+    }
+
+    /* 咕咚：酒面跟着晃一下再停住（甩一下衰减振荡）。
+       只用角度不用位移 —— 角度是尺度无关的，窗口放大也照样对。 */
+    @keyframes wineSlosh {
+      0%   { --slosh: 0deg; }
+      16%  { --slosh: 7deg; }
+      40%  { --slosh: -4.6deg; }
+      62%  { --slosh: 2.4deg; }
+      82%  { --slosh: -1deg; }
+      100% { --slosh: 0deg; }
+    }
+    body.gulp .bt-liq { animation: wineSlosh .68s cubic-bezier(.3, .7, .4, 1); }
 
     /* 烟圈：只在"吐"的那一拍喷出来，先急后缓（原来匀速上升是假感主因） */
     /* 烟柱起点跟着火头走（--cig-tip-* 由 JS 按当前燃烧长度算），
@@ -392,7 +511,12 @@
       <div id="head"><div id="headSpin"><img alt="" /></div></div>
       <div id="eyes"></div>
       <div id="cig"><i></i></div>
-      <div id="bottle"><i></i></div>
+      <div id="bottle">
+        <span class="bt-body"><span class="bt-liq"></span></span>
+        <span class="bt-neck"><span class="bt-nliq"></span></span>
+        <span class="bt-sheen"></span>
+        <span class="bt-cap"></span>
+      </div>
       <div id="smoke"><i></i><i></i><i></i></div>
       <div id="zzz"><b>Z</b><b>Z</b><b>Z</b></div>
       <div id="burst"></div>

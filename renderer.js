@@ -428,7 +428,7 @@
     clearBeats();
     document.body.classList.remove(
       'drunk', 'drunk2', 'asleep', 'nod', 'smoking', 'blue', 'revive', 'drinking',
-      'sip', 'tiltback', 'slump', 'ember', 'puffing', 'ash-tap'
+      'sip', 'sip-deep', 'gulp', 'tiltback', 'slump', 'ember', 'puffing', 'ash-tap'
     );
     setVar('--burn', 0);
     setVar('--sip', 0);
@@ -508,15 +508,24 @@
   }
 
   // 喝酒：一次 = 举瓶 → 灌（三下咕咚）→ 放下 → 回味
+  // 酒瓶的真实感全在"液面"上（见 index.html 的 #bottle）：每吞一口液面掉一格，
+  // 举起来的时候酒往瓶口那头流、瓶颈里也有酒，放下时又流回去。
   function drinkBeats(drunk) {
     document.body.classList.add('drinking');
     show('e_sleepy');                    // 真喝醉的人不会瞪大眼
     if (!drunk) cue(6000, () => document.body.classList.add('nod'));
-    const gulp = (t, hold, sip) => {
-      cue(t, () => { pulse('sip', hold + 900); });               // 举瓶（1.15s 缓动抬起）
-      cue(t + 650, () => setVar('--sip', sip));                   // 液面下降
+    // deep = 见底那一口：瓶底要竖得更高才够得着（body.sip-deep 加 14°）
+    const gulp = (t, hold, sip, deep) => {
+      cue(t, () => {
+        pulse('sip', hold + 900);                   // 举瓶（1.15s 缓动抬起）
+        if (deep) pulse('sip-deep', hold + 900);
+      });
+      cue(t + 650, () => setVar('--sip', sip));     // 液面下降（.7s，跟着吞咽走）
       for (let k = 0; k < 3; k++) {                               // 咕咚：瓶子跟着起伏
-        cue(t + 900 + (hold / 3) * k, () => pulse('tiltback', hold / 3 + 220));
+        cue(t + 900 + (hold / 3) * k, () => {
+          pulse('tiltback', hold / 3 + 220);          // 头往后一仰
+          pulse('gulp', 680);                         // 酒面晃一下再停住
+        });
       }
       cue(t + hold + 800, () => pulse('slump', 1400));            // 放下后回一口气
     };
@@ -524,7 +533,7 @@
     gulp(8200, 2100, 0.46);
     gulp(16400, 2200, 0.72);
     if (drunk) {
-      gulp(23800, 1900, 0.9);                                     // 醉的那条线还有第四口
+      gulp(23800, 1900, 0.9, true);                               // 醉的那条线还有第四口
       cue(15500, () => document.body.classList.add('drunk'));      // 前 15 秒还是清醒的
       cue(27500, () => document.body.classList.add('drunk2'));     // 后段晃得更厉害
     } else {

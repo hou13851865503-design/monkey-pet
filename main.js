@@ -2700,10 +2700,30 @@ if (!gotTheLock) {
                 '(() => { const i = document.querySelector("#smoke i"); const cs = getComputedStyle(i);' +
                 ' const c = document.querySelector("#cig"); const cc = getComputedStyle(c);' +
                 ' const rs = getComputedStyle(document.documentElement);' +
+                // 酒瓶：把"瓶身角度 / 液面角度 / 液面位置"都量出来。
+                // 只看截图判断不了液面到底平不平 —— 数字才说得清。
+                ' const bt = document.getElementById("bottle"); const bc = getComputedStyle(bt);' +
+                ' const lq = document.querySelector(".bt-liq"); const lc = lq ? getComputedStyle(lq) : null;' +
+                ' const nk = document.querySelector(".bt-nliq"); const nc = nk ? getComputedStyle(nk) : null;' +
+                ' const ang = (t) => { const m = /matrix\\(([^)]+)\\)/.exec(t || "");' +
+                '   if (!m) return null; const v = m[1].split(",").map(Number);' +
+                '   return Math.round(Math.atan2(v[1], v[0]) * 180 / Math.PI * 10) / 10; };' +
+                // 液面到底平不平，只有把**整条祖先链**的自转加起来才算得出来。
+                // 只比 bodyAng 与 liqAng 会漏掉 #lean（仰头角）那一层 ——
+                // 那 6.5° 正好是"瓶身和液面互相抵消"之外多出来的一份。
+                ' const up = (() => { let s = 0; for (let e = bt.parentElement; e && e !== document.body; e = e.parentElement) {' +
+                '   const a = ang(getComputedStyle(e).transform); if (a) s += a; } return Math.round(s * 10) / 10; })();' +
                 ' return { cls: document.body.className, op: cs.opacity, tr: cs.transform,' +
                 ' w: cs.width, bg: cs.backgroundImage.slice(0, 40), anim: cs.animationName,' +
                 ' cig: { tf: cc.transform, h: cc.height, w: cc.width, left: cc.left, top: cc.top },' +
                 ' tip: [rs.getPropertyValue("--cig-tip-x").trim(), rs.getPropertyValue("--cig-tip-y").trim()],' +
+                ' bottle: { op: bc.opacity, tf: bc.transform, bodyAng: ang(bc.transform), upAng: up,' +
+                '   tilt: bc.getPropertyValue("--tilt").trim(), pour: bc.getPropertyValue("--pour").trim(),' +
+                '   sip: bc.getPropertyValue("--sip").trim(), leanA: bc.getPropertyValue("--leanA").trim(),' +
+                '   liqTop: lc && lc.top, liqAng: lc && ang(lc.transform), liqH: lc && lc.height,' +
+                // 世界坐标里的液面倾角：三份自转加起来。0 = 严格水平（--slosh 抖动时除外）
+                '   surface: Math.round((up + ang(bc.transform) + (lc ? ang(lc.transform) : 0)) * 10) / 10,' +
+                '   neckClip: nc && nc.clipPath, neckIn: nk && nk.getBoundingClientRect().height },' +
                 ' frame: (document.querySelector("img.f.active") || {}).src }; })()'
               );
               console.log('[action] shot ' + ms + ' ' + JSON.stringify(dbg));
