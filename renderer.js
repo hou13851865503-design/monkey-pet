@@ -208,10 +208,17 @@
     st.setProperty('--head-feather', ((profile.anchors && profile.anchors.headFeather) || 0.032) * 100 + '%');
   })();
 
+  // 底部安全余量：整只动物在窗口里往上抬这么多。
+  // 素材的脚底正好压在图片最后一行（底部留白 0px），所以只要姿态里有任何
+  // "往下沉"（走路的起伏、落地下压、呼吸那 2px），脚就会被窗口底边整块裁掉。
+  // 引擎已经把 dy 钳在 footRoom 以内，这里再把整体抬起来，脚就永远在窗口里。
+  const footRoom = (anim.profile && anim.profile.footRoom) || 0;
+
   // 把引擎算出的姿态贴到 #gait（铺满窗口，所以百分比位移 = 窗口比例，天然与尺寸无关）
   function applyPose(pose) {
     gaitEl.style.transform =
-      'translate(' + (pose.dx * 100).toFixed(3) + '%, ' + (pose.dy * 100).toFixed(3) + '%)' +
+      'translate(' + (pose.dx * 100).toFixed(3) + '%, ' +
+        ((pose.dy - footRoom) * 100).toFixed(3) + '%)' +
       ' rotate(' + pose.rot.toFixed(2) + 'deg)' +
       ' scale(' + pose.sx.toFixed(4) + ', ' + pose.sy.toFixed(4) + ')';
 

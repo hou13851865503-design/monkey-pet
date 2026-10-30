@@ -22,6 +22,10 @@
                 切线上不会有缝。
     headSpin  = 头心的位置（切线以上那半截的包围盒中心）
                 旋转支点。必须绕头心转，绕脖子转会让整个头平移出去。
+    footRoom  = 最低一行实体像素到图底边的留白
+                这个值顺手就量了：脚是地面接触点，留白 0 意味着素材的脚底正好
+                压在图片最后一行，任何"往下沉"（走路起伏、落地下压、呼吸位移）
+                都会被窗口底边整块切掉 —— 表现出来就是"走路时脚不见了"。
 
 依赖：Pillow（pip install pillow）
 """
@@ -45,6 +49,13 @@ PIVOT_DROP = 0.055
 
 # 抗锯齿边缘：alpha 低于这个值不算实体，不然毛发会虚出一圈把宽度算大
 ALPHA_ON = 128
+
+# footRoom 的下限。这个量是"脚还有多少下沉空间"，不是"图上有多少空白"：素材
+# 多半是贴底裁的（留白 0），照实写成 0 就等于没给，走路一起伏脚就出界。
+# 取 0.032 是按真机量出来的：最深的下沉动作是蹲下 0.021，加上旋转时最低那个角
+# 还会再往下两三个像素，余量 0.011 ≈ 2.5px 才是"贴着地但不压线"。
+# `npm test` 里有断言卡这条（每个动作的下沉 ≤ footRoom）。
+MIN_FOOT_ROOM = 0.032
 
 
 def row_extent(alpha, w, y):
@@ -97,14 +108,30 @@ def main():
     hx1 = max(r[2] for r in head_rows)
     spin = ((hx0 + hx1) / 2.0 / w, (hy0 + hy1) / 2.0 / h)
 
+    # 底部安全余量：最低一行实体像素到图底边的距离，就是 footRoom。
+    # 顺手量是因为矩阵这里已经算完了，而且这个值**不量就会出事**：留白 0 意味着
+    # 脚底正好压在图最后一行，走路起伏一旦往正方向（下沉）走，整只脚就会被窗口
+    # 底边切平。渲染层按这个值把整只上抬，引擎再把 dy 钳在它以内。
+    # 注意它不是单纯的"图上有多少空白"，而是"脚还有多少下沉空间"，所以留白再小
+    # 也要补到 MIN_FOOT_ROOM：素材很可能就是贴底裁的，那时空白是 0。
+    pad = h - 1 - rows[-1][0]
+    foot_room = max(pad / float(h), MIN_FOOT_ROOM)
+
     print('图        %dx%d' % (w, h))
     print('脖子那一行 y=%.0f (~%.3f)，宽 %d px = %.3f 窗宽' % (cut_y, cut, best_w, best_w / w))
     print('支点横向 x=%.3f（脖子中线）' % cx)
+    print('底部留白 %d px (~%.4f 窗高)，footRoom 取 %.3f' % (pad, pad / float(h), foot_room))
     print()
     print('抄进 character.json 的 anchors：')
     print('  "headCut": %.3f,' % cut)
     print('  "headPivot": [%.3f, %.3f],' % (cx, pivot_y))
     print('  "headSpin": [%.3f, %.3f],' % spin)
+    print('  "footRoom": %.3f,' % foot_room)
+
+    if pad <= 1:
+        print('\n⚠️ 这张图底部留白 %d px —— 脚底正好压在图最后一行。footRoom 已经按'
+              '下限 %.3f 补上了；不补的话走路时脚会被窗口底边整块裁掉。'
+              % (pad, MIN_FOOT_ROOM), file=sys.stderr)
 
     # 合理性检查：脖子必须明显窄于头顶最宽处，否则说明这张图没有脖子
     widest = max(width(r) for r in rows)
@@ -130,6 +157,7 @@ def main():
         doc.setdefault('anchors', {})['headCut'] = round(cut, 4)
         doc['anchors']['headPivot'] = [round(cx, 4), round(pivot_y, 4)]
         doc['anchors']['headSpin'] = [round(spin[0], 4), round(spin[1], 4)]
+        doc['anchors']['footRoom'] = round(foot_room, 4)
         with open(args.out, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(doc, f, ensure_ascii=False, indent=2)
             f.write('\n')

@@ -65,6 +65,11 @@
     };
     p.anchorFoot = clamp(num(p.anchors.foot, 0.995), 0.5, 1.2);
 
+    // 底部安全余量：素材的脚底常常正好压在图片最后一行（本形象底部留白 0px），
+    // 所以任何"往下沉"的位移都会被窗口裁掉 —— 用户看到的就是"走路时脚不见了"。
+    // 渲染层会把整只动物上抬这么多，于是它只会在静止线以上活动，脚永远在窗口内。
+    p.footRoom = clamp(num(p.anchors.footRoom, 0.018), 0, 0.08);
+
     // 脖子切线的位置（纵向比例）和头的旋转支点（横纵比例）。
     // 源码给的是"头顶那层从哪一行开始不再跟着身子"——量法见 tools/measure-neck.py：
     // 找轮廓宽度最小的那一行，就是下巴和肩膀之间的脖子。
@@ -344,8 +349,11 @@
           const g = P.gait;
           const p = st.walk.phase;
           const ph = (p % 1) * Math.PI * 2;
-          // 落脚瞬间最低（cos=1），两脚之间抬到最高
-          const bob = g.bob * (0.5 + 0.5 * Math.cos(ph));
+          // 起伏：落脚瞬间 = 静止高度（0），两脚之间抬到最高（-bob）。
+          // 原来写的是 (0.5+0.5cos)，落脚时反而往下沉一个 bob —— 素材脚底贴在窗口
+          // 最底一行、没有余量，这一沉就把整只脚推出窗口裁掉了。重心起伏应该在
+          // "地面线以上"，而不是"踩进地面里"。
+          const bob = -g.bob * (0.5 - 0.5 * Math.cos(ph));
           const sway = g.sway * Math.sin(ph);
           const sq = g.squash * Math.max(0, Math.cos(ph));
           pose.dy += bob;
@@ -380,6 +388,12 @@
           else frame = 'front';
         }
         if (st.state === 'drag' && !st.clip) frame = 'surprised';
+
+        // 5) 安全网：脚是地面接触点，任何把它推出窗口的下沉都不成立。
+        // 渲染层已经把整只动物上抬了 footRoom，所以 dy 一旦超过 footRoom，脚底
+        // 就会跑到窗口外面被裁掉。动作表里已经没有一个动作下沉超过这个量，
+        // 这条纯粹是防止以后新增动作时又把这条约束踩了。
+        pose.dy = Math.min(pose.dy, P.footRoom);
 
         st.pose = {
           dx: pose.dx, dy: pose.dy, rot: pose.rot,

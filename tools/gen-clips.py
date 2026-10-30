@@ -95,9 +95,12 @@ CLIPS = [
     # ---- 7. 蹲一蹲：全身下沉压扁，头跟着缩进去 ----
     dict(id="crouch", label="蹲一蹲", tags=["quiet"], weight=2, dur=2000, keys=[
         dict(t=0),
-        dict(t=0.16, dy=0.032, sy=0.918, sx=1.046, headSy=0.975, headDy=0.004),
-        dict(t=0.26, dy=0.036, sy=0.908, sx=1.052, headSy=0.968, headDy=0.005),
-        dict(t=0.64, dy=0.035, sy=0.912, sx=1.05, headSy=0.97, headDy=0.005),
+        # 下沉量不是随手写的：它和 anchors.footRoom 是一对。footRoom 是"脚还能往下
+        # 沉多少"，渲染层按它把整只抬起来，所以动作下沉一旦逼近 footRoom，脚就正好
+        # 压到窗口底边。这里留 0.011 = 约 2.5px 的呼吸空间（真机量过：0.024 时余量为 0）。
+        dict(t=0.16, dy=0.017, sy=0.918, sx=1.046, headSy=0.975, headDy=0.004),
+        dict(t=0.26, dy=0.021, sy=0.908, sx=1.052, headSy=0.968, headDy=0.005),
+        dict(t=0.64, dy=0.020, sy=0.912, sx=1.05, headSy=0.97, headDy=0.005),
         dict(t=0.82, dy=-0.007, sy=1.018, sx=0.988, headSy=1.008),
         dict(t=1.0),
     ]),
@@ -187,7 +190,7 @@ CLIPS = [
     # ---- 15. 落地：压缩 → 回弹（时长本来就短，只表达那一下冲击）----
     dict(id="land", label="落地", tags=["reaction"], dur=620, keys=[
         dict(t=0, dy=-0.01, sy=1.06, sx=0.955),
-        dict(t=0.16, dy=0.028, sy=0.898, sx=1.075, headSy=0.94, headDy=0.006),
+        dict(t=0.16, dy=0.019, sy=0.898, sx=1.075, headSy=0.94, headDy=0.006),
         dict(t=0.42, dy=-0.008, sy=1.026, sx=0.985, headSy=1.014),
         dict(t=0.66, dy=0.006, sy=0.99, sx=1.008),
         dict(t=1.0),

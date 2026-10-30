@@ -90,16 +90,48 @@ t('打得远一点：同样是 3 步的距离，窗口放大一倍后走得更�
   assert.ok(Math.abs(a1.stepCount - 3) < 1e-9);
 });
 
-t('落脚最低、抬脚最高：phase 整数时 dy 最大，半相位时 dy 归零', () => {
+// 这条断言的方向是被一个真机 bug 反过来的：原来的起伏是「落脚时往下沉一个 bob」，
+// 可素材脚底本来就贴着窗口最底一行（底部留白 0px），一沉就把整只脚推出窗口裁掉了
+// —— 用户看到的就是「走路时脚不见了」。起伏必须在**地面线以上**发生：
+// 落脚 = 静止高度(0)，两脚之间抬到最高(-bob)。
+t('落脚回地面、抬脚到最高：phase 整数时 dy 归零，半相位时 dy = -bob', () => {
   const p = PetAnim.normalize(profile);
   const a = PetAnim.create(profile);
   const W = 192;
   a.startWalk(1);
   a.tick(16);
-  assert.ok(Math.abs(a.pose.dy - p.gait.bob) < 1e-9, 'phase=0 应下沉 ' + p.gait.bob + '，实际 ' + a.pose.dy);
+  assert.ok(Math.abs(a.pose.dy) < 1e-9, 'phase=0 应回到静止高度 0，实际 ' + a.pose.dy);
   a.advance(p.gait.stride * W * 0.5, W);
   a.tick(16);
-  assert.ok(Math.abs(a.pose.dy) < 1e-9, '半相位应回到 0，实际 ' + a.pose.dy);
+  assert.ok(Math.abs(a.pose.dy + p.gait.bob) < 1e-9, '半相位应抬到 ' + (-p.gait.bob) + '，实际 ' + a.pose.dy);
+});
+
+// 起伏只能往上：凡是"往下沉"的表达都会把脚推出窗口。
+t('走路全程 dy 都不为正（脚不会沉到窗口外面去）', () => {
+  const p = PetAnim.normalize(profile);
+  const a = PetAnim.create(profile);
+  const W = 192;
+  a.startWalk(1);
+  let worst = -9;
+  for (let i = 0; i < 120; i++) {
+    a.advance((p.gait.stride * W) / 12, W);
+    a.tick(16);
+    worst = Math.max(worst, a.pose.dy);
+  }
+  assert.ok(worst <= 1e-9, '走了一圈最多下沉了 ' + worst.toFixed(4) + '，脚会被窗口底边裁掉');
+});
+
+// 动作也不能把脚推到窗口外面：footRoom 是渲染层上抬的量，dy 超过它脚就出界。
+t('每个动作的下沉量都不超过 footRoom（否则脚会被窗口裁掉）', () => {
+  const p = PetAnim.normalize(profile);
+  const bad = [];
+  p.clips.forEach((c) => {
+    let mx = -9;
+    for (let i = 0; i <= 100; i++) mx = Math.max(mx, PetAnim.sampleKeys(c.keys, i / 100).dy);
+    if (mx > p.footRoom + 1e-9) bad.push(c.id + ' 下沉 ' + mx.toFixed(4));
+  });
+  assert.strictEqual(bad.length, 0,
+    '这些动作会把脚推出窗口（footRoom=' + p.footRoom + '）：' + bad.join('、'));
 });
 
 t('走动时朝移动方向倾，反向走就反着倾', () => {
@@ -351,7 +383,10 @@ t('换形象（尺寸/步幅全变）后，引擎的语义不变：一步 = 一�
   a.advance(p.gait.stride * 320, 320);
   assert.ok(Math.abs(a.stepCount - 1) < 1e-9);
   a.tick(16);
-  assert.ok(Math.abs(a.pose.dy - 0.03) < 1e-9, '起伏幅度应跟着新档案走');
+  // 半相位是最高点，幅度 = -bob，所以这里同样要按"往上"来比
+  a.advance(p.gait.stride * 320 * 0.5, 320);
+  a.tick(16);
+  assert.ok(Math.abs(a.pose.dy + 0.03) < 1e-9, '起伏幅度应跟着新档案走，实际 ' + a.pose.dy);
   assert.strictEqual(a.zoneAt(0.5, 0.2).id, 'head', '命中分区也跟着档案走');
 });
 

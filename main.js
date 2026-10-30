@@ -2028,7 +2028,30 @@ async function testWalk() {
         ' walking: window.__petAnim.walking, state: window.__petAnim.state,' +
         ' frame: window.__petAnim.pose.frame,' +
         ' rot: Math.round(window.__petAnim.pose.rot*100)/100,' +
-        ' dy: Math.round(window.__petAnim.pose.dy*10000)/10000})');
+        ' dy: Math.round(window.__petAnim.pose.dy*10000)/10000,' +
+        // 姿态最终是 CSS 上的一串 transform，引擎算得再对、CSS 没接上也是白算。
+        // 这里把 DOM 上的真值一起带出来：gait 的位移有没有把整只抬起来、
+        // 精灵图的底边离窗口底边还剩多少（<=0 就是脚被裁了）。
+        ' gaitTf: (document.getElementById("gait").style.transform||"none"),' +
+        ' imgBottom: (() => {' +
+        '   const el = document.querySelector("#breath img.active") || document.querySelector("#breath img");' +
+        '   return el ? Math.round(el.getBoundingClientRect().bottom*10)/10 : -1; })(),' +
+        ' imgBox: (() => {' +
+        '   const el = document.querySelector("#breath img.active") || document.querySelector("#breath img");' +
+        '   if (!el) return "none";' +
+        '   const r = el.getBoundingClientRect();' +
+        '   return [Math.round(r.top), Math.round(r.bottom), Math.round(r.height)].join("/"); })(),' +
+        ' view: document.documentElement.clientHeight + "x" + document.documentElement.clientWidth,' +
+        ' dpr: devicePixelRatio,' +
+        // 各层 rect：#tilt 的透视旋转会让子元素的包围盒比视口更高/更矮（这是量截图时
+        // "脚怎么忽然贴边了"的真正来源），所以在日志里把每层各自的位置都带上，
+        // 免得下次又把"透视造成的偏移"当成"姿态算错了"。
+        ' layers: ["stage","tilt","gait","pose","lean","breath"].map(function (id) {' +
+        '   const el = document.getElementById(id); if (!el) return id + ":none";' +
+        '   const r = el.getBoundingClientRect();' +
+        '   return id + "=" + Math.round(r.top) + ".." + Math.round(r.bottom) +' +
+        '     (el.style.transform ? " {" + el.style.transform + "}" : ""); }).join(" | "),' +
+        ' win: innerWidth + "x" + innerHeight})');
       lines.push(tag + ' renderer=' + dbg);
       if (process.env.PET_TEST_WALK_SHOTS) {
         const img = await win.webContents.capturePage();
