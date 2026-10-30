@@ -2,17 +2,22 @@
 // - 17 张素材叠层，靠 opacity 交叉淡入 => 切帧连贯
 // - 朝向映射禁用 04/05/06（带背面）=> 永不露背
 // - #tilt 透视倾斜 => 伪 3D 跟随鼠标
+// - #gait 步态层 => 走路起伏 / 落地压扁 / 拖拽悬垂（anim.js 每帧算姿态）
 // - 长按 + 滚轮 => 缩放
 // - 系统闲置 => 睡觉；键鼠动 => 醒
 // - 鼠标在身上快速来回 => 撸它（害羞/喜欢）
-// - 双击 => 情绪菜单；单击 => 随机开心
+// - 双击 => 情绪菜单；单击 => 按部位给不同反应
 // - 番茄钟专注态 => 思考脸
-// 状态机：idle / emotion / drag / sleepy / focus
+// 状态机：idle / emotion / drag / sleepy / focus / action / walk / gesture
+// 角色相关的数值（步幅、命中盒、脚底支点、动作表）全在 character.json，
+// 这里只负责把引擎算出来的姿态贴到 DOM 上。
 (function () {
   const stage = document.getElementById('stage');
   const tilt = document.getElementById('tilt');
+  const gaitEl = document.getElementById('gait');
   const breath = document.getElementById('breath');
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const ipc = window.pet || null;
 
   // 眩晕 / 喝酒抽烟等"正在做动作"的状态，提前声明避免 enter() 里的 TDZ
   let dizzyUntil = 0, dizzyTimer = null;
@@ -73,6 +78,79 @@
   let direction = 0;
   let blinkTimer = null, emotionTimer = null;
 
+  // ---- 姿态引擎 ----
+  // 角色档案由主进程读 character.json 后同步过来（尺寸、命中盒、脚底支点、步幅、动作表）。
+  // 读不到就降级成"只有朝向、没有动作表"，绝不因为档案问题白屏。
+  const FALLBACK_PROFILE = {
+    size: [192, 223],
+    frames: {
+      front: 'd0', side: 'd2',
+      emotions: {
+        angry: 'e_angry', cheer: 'e_cheer', love: 'e_love', sad: 'e_sad', shy: 'e_shy',
+        sleepy: 'e_sleepy', surprised: 'e_surprised', thinking: 'e_thinking', wink: 'e_wink',
+      },
+    },
+    zones: [
+      { id: 'head', box: [0.24, 0.03, 0.80, 0.46], reaction: 'headTap' },
+      { id: 'body', box: [0.14, 0.46, 0.94, 1.00], reaction: 'bodyTap' },
+    ],
+    clips: [],
+  };
+  let profile = FALLBACK_PROFILE;
+  try {
+    const fromMain = ipc && ipc.getCharacter ? ipc.getCharacter() : null;
+    if (fromMain && Array.isArray(fromMain.clips) && fromMain.clips.length) profile = fromMain;
+  } catch (_) {}
+  const anim = window.PetAnim.create(profile);
+  // 调试句柄：自动化测试要核对"主进程发了位移、渲染层步频有没有真的跟着走"，
+  // 没有这个就只能看到窗口在动、看不到脚步在走。
+  window.__petAnim = anim;
+  // 脚底支点跟着档案走：换形象后旋转/挤压自动绕新素材的脚底发生
+  try {
+    if (profile.anchors && profile.anchors.foot) {
+      document.documentElement.style.setProperty('--foot', String(profile.anchors.foot * 100) + '%');
+    }
+  } catch (_) {}
+
+  // 把引擎算出的姿态贴到 #gait（铺满窗口，所以百分比位移 = 窗口比例，天然与尺寸无关）
+  function applyPose(pose) {
+    gaitEl.style.transform =
+      'translate(' + (pose.dx * 100).toFixed(3) + '%, ' + (pose.dy * 100).toFixed(3) + '%)' +
+      ' rotate(' + pose.rot.toFixed(2) + 'deg)' +
+      ' scale(' + pose.sx.toFixed(4) + ', ' + pose.sy.toFixed(4) + ')';
+  }
+
+  // 只有"走动 / 拖拽 / 播动作"这三件事由引擎决定帧和镜像；
+  // 其余时间（待机）还是按鼠标朝向选帧，保持原有手感。
+  function animOwnsFrame() {
+    return anim.walking || anim.state === 'drag' || !!anim.clipId;
+  }
+  function applyAnimFrame(pose) {
+    if (!animOwnsFrame()) return;
+    if (anim.walking) {
+      dirK = pose.facing;
+      document.body.classList.toggle('faceLeft', pose.facing < 0);
+    } else if (anim.state !== 'drag') {
+      document.body.classList.remove('faceLeft');
+    }
+    if (pose.frame) show(pose.frame);   // 空帧（比如纯挤压动作）不动当前脸
+  }
+
+  // 引擎的状态变化同步到渲染层状态机：走完/播完都要回到待机，否则朝向会卡住
+  let animPhase = '';
+  function syncAnimState() {
+    const cur = anim.walking ? 'walk' : (anim.clipId ? 'gesture' : 'idle');
+    if (cur === animPhase) return;
+    const prev = animPhase;
+    animPhase = cur;
+    if (cur === 'walk') state = 'walk';
+    else if (cur === 'gesture') state = 'gesture';
+    else if (prev === 'walk' || prev === 'gesture') {
+      enter(focusing ? 'focus' : 'idle');
+      try { if (ipc && ipc.refreshFacing) ipc.refreshFacing(); } catch (_) {}
+    }
+  }
+
   function showDirection() {
     // 只有真正空闲时才换朝向帧：动作/情绪/拖拽/眩晕/专注期间一律让路，
     // 否则鼠标一动就会把正在播的动作帧顶掉，形成来回闪。
@@ -97,8 +175,26 @@
     if (ax < SIDE_OFF || !sideways) return 0; // 收窄了才回正，避免边界抖动
     return dx < 0 ? -1 : 1;
   }
+  // 外部状态（睡 / 专注 / 抽烟喝酒 / 眩晕）期间锁住引擎，
+  // 免得自主动作把正在演的画面顶掉；状态一变就重新对齐锁。
+  function syncLock() {
+    if (state === 'sleepy') { anim.lock(3600e3, 'sleep'); return; }
+    if (state === 'focus') { anim.lock(3600e3, 'focus'); return; }
+    if (state === 'action') return;             // setAction 自己锁了 30 秒，别在这里缩短
+    if (isDizzy()) { anim.lock(1500, 'dizzy'); return; }
+    anim.unlock();
+  }
+
+  // 走动被打断时必须同时通知主进程停步，否则会"一边演动作一边被平移"，看着像在滑行
+  function interruptWalk() {
+    if (!anim.walking) return;
+    anim.stopWalk();
+    try { if (ipc && ipc.stopWalk) ipc.stopWalk(); } catch (_) {}
+  }
+
   function enter(s) {
     if (Date.now() < actionUntil) return;   // 抽烟/喝酒期间不让其它状态抢画面
+    if (s !== 'walk') interruptWalk();
     state = s;
     document.body.classList.toggle('dragging', s === 'drag');
     if (s !== 'idle') document.body.classList.remove('faceLeft');  // 情绪/拖拽帧不镜像
@@ -111,14 +207,21 @@
     else if (s === 'sleepy') show('e_sleepy');
     else if (s === 'drag') show('e_surprised');
     else if (s === 'focus') show('e_thinking');
+    syncLock();
   }
   function triggerEmotion(name, holdMs = 1500) {
     if (state === 'drag') return;
     if (isBusy()) return;                  // 眩晕 / 抽烟喝酒期间不被其它情绪打断
+    // 走动途中不插表情：走动是一段连续的步态，中间被一张表情脸顶掉会明显顿一下。
+    // 表情本来就是短反馈，等它走完再说（气泡是独立窗口，问候照样能看到）。
+    if (anim.walking) return;
     clearTimeout(emotionTimer);
     enter('emotion');
     show('e_' + name);
-    emotionTimer = setTimeout(() => { enter(focusing ? 'focus' : 'idle'); }, holdMs);
+    emotionTimer = setTimeout(() => {
+      if (anim.walking) return;            // 情绪到期时如果已经在走动，就把画面让给步态
+      enter(focusing ? 'focus' : 'idle');
+    }, holdMs);
   }
 
   // ---- 眩晕：快速拖动触发，头顶转圈 + 身体摇晃 ----
@@ -130,6 +233,8 @@
     document.body.classList.remove('faceLeft');   // 眩晕用正面帧，别镜像
     clearTimeout(emotionTimer);
     show('d0');                    // 正面睁眼帧，和眼白/螺旋的位置对齐
+    anim.cancel();                 // 晕的时候别让动作姿态继续扭
+    anim.lock(ms + 150, 'dizzy');
     clearTimeout(dizzyTimer);
     dizzyTimer = setTimeout(() => {
       dizzyUntil = 0;
@@ -179,6 +284,7 @@
   function setAction(classes, ms, frame) {
     clearTimeout(actionTimer);
     clearAction();
+    interruptWalk();                 // 抽烟/喝酒前先停步
     document.body.classList.remove('faceLeft');
     classes.split(' ').forEach((c) => { if (c) document.body.classList.add(c); });
     state = 'action';
@@ -186,6 +292,8 @@
     // 动作期间目光落在远处，不再跟着鼠标转（忧郁的前提是"望远方"）
     tiltTarget.ry = 7; tiltTarget.rx = 2;
     actionUntil = Date.now() + ms;
+    anim.cancel();                    // 抽烟/喝酒有自己的时间轴，别叠加引擎的姿态
+    anim.lock(ms + 200, 'action');
     actionTimer = setTimeout(() => {
       clearAction();
       tiltTarget.ry = 0; tiltTarget.rx = 0;
@@ -296,16 +404,20 @@
     }, wait);
   }
 
-  // ---- 空闲自主状态：每隔 9~21 秒自己搞点事（环顾 / 换表情 / 小跳）----
+  // ---- 空闲自主动作 ----
+  // 有动作表时交给引擎调度：动作之间留 7~18 秒静默（静默期只允许待机/转头）。
+  // "一直在动"会烦人，"一直不动"像死物 —— 这个间隔就是自然感的来源。
+  // 没有动作表时（浏览器直接预览）退回原来的环顾 / 换表情 / 小跳。
   let autoMood = true;
   let moodTimer = null;
+  let lastMoodAt = 0;
+
   function pickMood() {
     const r = Math.random();
     if (ipc && ipc.debug) ipc.debug('mood r=' + r.toFixed(2));
     // 鼠标刚动过就别自己"环顾"，否则会和跟随鼠标的朝向打架
     const canLook = Date.now() - lastCursorAt > 4000;
     if (canLook && r < 0.5) {
-      // 环顾：临时转向一侧，再回到原来的朝向
       const old = dirK;
       const side = Math.random() < 0.5 ? -1 : 1;
       dirK = side;   // 只有正脸/侧脸两种帧，环顾就是直接转头
@@ -326,14 +438,18 @@
       setTimeout(() => document.body.classList.remove('hop'), 650);
     }
   }
+
+  function autoAct() {
+    if (!autoMood || focusing || isDizzy() || document.hidden) return;
+    if (state !== 'idle' || anim.busy || anim.walking || anim.clipId) return;
+    if (profile.clips && profile.clips.length) { anim.maybeGesture(); return; }
+    if (Date.now() - lastMoodAt < 120000 + Math.random() * 90000) return;
+    lastMoodAt = Date.now();
+    pickMood();
+  }
   function scheduleMood() {
-    clearTimeout(moodTimer);
-    // 2~5 分钟才换一次状态，避免"一直在动"的烦躁感
-    const wait = 120000 + Math.random() * 180000;
-    moodTimer = setTimeout(() => {
-      if (autoMood && state === 'idle' && !focusing && !isDizzy() && !document.hidden) pickMood();
-      scheduleMood();
-    }, wait);
+    clearInterval(moodTimer);
+    moodTimer = setInterval(autoAct, 1000);
   }
 
   // 平滑倾斜 + 上下位移（看向上方/下方时整体轻微上移/下沉）
@@ -380,9 +496,33 @@
   }
 
   // ---- 数据源：Electron 走 IPC；浏览器预览则监听鼠标 ----
-  const ipc = window.pet || null;
   if (ipc) {
     ipc.onCursor(handleCursor);
+
+    // ---- 走动：主进程决定"去哪儿"，渲染层只把位移换算成步频 ----
+    // 这里传的是**这一帧真实移动了多少像素**，不是时间 —— 所以走得快脚步就快，
+    // 走得慢脚步就慢，脚永远不会打滑。
+    if (ipc.onWalkStart) {
+      ipc.onWalkStart((d) => {
+        if (state === 'drag' || isBusy()) return;
+        anim.startWalk(d && d.dir < 0 ? -1 : 1);
+      });
+    }
+    if (ipc.onWalkStep) ipc.onWalkStep((dx) => anim.advance(dx, window.innerWidth));
+    if (ipc.onWalkEnd) ipc.onWalkEnd(() => anim.stopWalk());
+
+    // ---- 拖拽：主进程每 16ms 给一次速度，用来做"身体滞后于手"的悬空感 ----
+    if (ipc.onDragVel) ipc.onDragVel((vx, vy) => anim.dragVel(vx, vy));
+    // 松手落地：竖直速度决定压扁强度
+    if (ipc.onLand) ipc.onLand((vy) => anim.endDrag(vy));
+
+    // 右键菜单里手点某个动作
+    if (ipc.onGesture) {
+      ipc.onGesture((id) => {
+        if (state === 'drag' || isBusy()) return;
+        if (anim.play(id, { force: true })) state = 'gesture';
+      });
+    }
     if (ipc.onIdle) {
       ipc.onIdle((asleep) => {
         if (focusing) return;
@@ -439,12 +579,34 @@
     };
   }
 
-  (function tiltLoop() {
-    requestAnimationFrame(tiltLoop);
+  // ---- 主循环：先推进姿态引擎，再把姿态贴到 DOM，最后算透视倾斜 ----
+  // 顺序不能反：姿态是"这一帧的事实"，透视只是在它外面套一层视角。
+  let lastActivity = '';
+  function reportActivity() {
+    if (!ipc || !ipc.setActivity) return;
+    const k = anim.walking ? 'walk' : (anim.clipId ? 'gesture' : state);
+    if (k === lastActivity) return;
+    lastActivity = k;
+    try { ipc.setActivity(k); } catch (_) {}
+  }
+
+  let lastFrameAt = 0;
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    const dt = lastFrameAt ? Math.min(120, ts - lastFrameAt) : 16;
+    lastFrameAt = ts;
+
+    const pose = anim.tick(dt);
+    applyPose(pose);
+    applyAnimFrame(pose);
+    syncAnimState();
+    reportActivity();
+
     tiltCur.rx += (tiltTarget.rx - tiltCur.rx) * 0.15;
     tiltCur.ry += (tiltTarget.ry - tiltCur.ry) * 0.15;
     tilt.style.transform = `perspective(700px) rotateY(${tiltCur.ry}deg) rotateX(${tiltCur.rx}deg) translateY(${gaze.y}px)`;
-  })();
+  }
+  requestAnimationFrame(loop);
 
   // ---- 透明区域不挡鼠标 ----
   // 由主进程每 30ms 读取真实光标位置 + 当前帧 alpha 判断并切换，渲染端不参与，
@@ -455,11 +617,19 @@
   let downX = 0, downY = 0, clickTimer = null;
   let downCX = 0, downCY = 0;
   let lpTimer = null, longPressed = false;
+  let downZone = '';      // 按下的部位：head / body（来自角色档案的命中盒，换形象自动跟着变）
 
   function scheduleClick() {
     clearTimeout(clickTimer);
     clickTimer = setTimeout(() => {
-      if (state !== 'drag') triggerEmotion(POSITIVE[Math.floor(Math.random() * POSITIVE.length)]);
+      if (state === 'drag' || isBusy()) return;
+      // 走动时被戳：先让主进程停步，再给反应 —— 否则会边平移边演，像在滑行
+      interruptWalk();
+      // 点头 = 摸头（缩一下、害羞），点身子 = 被戳（先惊后开心）。
+      // 两个反应都是引擎里的动作，所以换形象后照样成立；档案里没配动作就退回随机开心脸。
+      const clip = downZone === 'head' ? 'headTap' : (downZone === 'body' ? 'bodyTap' : '');
+      if (clip && anim.play(clip)) { state = 'gesture'; return; }
+      triggerEmotion(POSITIVE[Math.floor(Math.random() * POSITIVE.length)]);
     }, 230);
   }
   function onWinUp() {
@@ -469,8 +639,10 @@
     if (!dragging) return;
     dragging = false;
     if (longPressed) { longPressed = false; return; }   // 长按已触发专注，不再触发点击情绪
-    if (moved) { if (ipc) ipc.dragEnd(); triggerEmotion('cheer', 1200); }
-    else { scheduleClick(); }
+    if (moved) {
+      anim.setDrag(false);
+      if (ipc) ipc.dragEnd();       // 落地压扁由主进程回传的落速驱动
+    } else { scheduleClick(); }
   }
 
   stage.addEventListener('pointerdown', (e) => {
@@ -478,7 +650,14 @@
     dragging = true; moved = false; longPressed = false;
     downX = e.screenX; downY = e.screenY;
     downCX = e.clientX; downCY = e.clientY;
-    scheduleMood();   // 每次互动后重新计时，安静 2~5 分钟
+    {
+      const r = stage.getBoundingClientRect();
+      const z = anim.zoneAt((e.clientX - r.left) / Math.max(1, r.width),
+                            (e.clientY - r.top) / Math.max(1, r.height));
+      downZone = z ? z.id : '';
+    }
+    anim.noteInteraction();   // 刚被摸过，自主动作重新计时
+    scheduleMood();
     window.addEventListener('mouseup', onWinUp);
     window.addEventListener('blur', onWinUp);
     // 长按 0.65s 且没拖动 => 开始 / 停止专注
@@ -500,6 +679,7 @@
       moved = true;
       clearTimeout(lpTimer);
       enter('drag');
+      anim.setDrag(true);          // 悬空姿态从这一刻开始接管
       if (ipc) ipc.dragStart();
     }
   });

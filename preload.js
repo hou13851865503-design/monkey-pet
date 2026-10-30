@@ -7,6 +7,26 @@ contextBridge.exposeInMainWorld('pet', {
   dragStart: () => ipcRenderer.send('drag-start'),
   dragEnd: () => ipcRenderer.send('drag-end'),
 
+  // ---------- 角色档案（尺寸 / 命中盒 / 鞋底支点 / 步态 / 动作表）----------
+  // 同步取一次即可：窗口加载时就要用它建引擎，异步会在首帧出现空白姿态。
+  getCharacter: () => ipcRenderer.sendSync('character'),
+
+  // ---------- 自主走动：主进程决定去哪，渲染层把位移换算成步频 ----------
+  onWalkStart: (cb) => ipcRenderer.on('walk-start', (_e, d) => cb(d)),
+  onWalkStep: (cb) => ipcRenderer.on('walk-step', (_e, dx) => cb(dx)),
+  onWalkEnd: (cb) => ipcRenderer.on('walk-end', () => cb()),
+  // 目前正在干什么（主进程据此决定要不要让它自己散步）
+  setActivity: (kind) => ipcRenderer.send('pet-activity', kind),
+  // 让主进程立刻停止推窗口（走动被点击/情绪打断时必须先停，否则会边演动作边平移）
+  stopWalk: () => ipcRenderer.send('stop-walk'),
+
+  // ---------- 拖拽速度 / 落地速度 ----------
+  onDragVel: (cb) => ipcRenderer.on('drag-vel', (_e, vx, vy) => cb(vx, vy)),
+  onLand: (cb) => ipcRenderer.on('land', (_e, vy) => cb(vy)),
+
+  // ---------- 菜单里手动指定动作 ----------
+  onGesture: (cb) => ipcRenderer.on('play-gesture', (_e, id) => cb(id)),
+
   // ---------- 光标偏移（主进程轮询真实鼠标位置下发）----------
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, dx, dy) => cb(dx, dy)),
 

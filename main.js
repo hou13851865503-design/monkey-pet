@@ -9,6 +9,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn, execFile } = require('child_process');
 const wb = require('./wb');
+const animWd = require('./anim');   // 只复用 walkDuration / walkEase，姿态仍由渲染层算
 
 const WIN_W = 192;
 const WIN_H = 223;
@@ -22,6 +23,34 @@ const SNAP = 16;             // 距屏幕边缘多少 px 判定吸附
 const PEEK = 44;             // 贴边后露出的像素
 const PEEK_DELAY = 4000;     // 停靠后多久自动缩进
 const BUBBLE_W = 248;        // 气泡窗宽度
+
+// 自主散步：隔多久考虑一次、走一段最长/最短
+const WANDER_MIN = 45000, WANDER_MAX = 150000;
+const WANDER_STEP = 1200;    // 散步时相邻两帧的最小间隔（太小会推着窗口抖）
+
+// ---------- 角色档案 ----------
+// 步态、命中盒、脚底支点、动作表都在 character.json：换形象只改这个文件 + 素材，
+// 主进程和渲染层都不用动。读不到就退化成"只会站着、不会散步"，绝不影响启动。
+const characterPath = path.join(__dirname, 'character.json');
+let characterProfile = null;
+function loadCharacter() {
+  try {
+    characterProfile = JSON.parse(fs.readFileSync(characterPath, 'utf8'));
+  } catch (e) {
+    logCrash('character', e);
+    characterProfile = { size: [WIN_W, WIN_H], gait: {}, clips: [] };
+  }
+  return characterProfile;
+}
+loadCharacter();
+
+// 渲染层上报"现在在干什么"：idle | gesture | walk | drag | action | sleep | focus
+let petActivity = 'idle';
+
+// 这两个通道在模块加载时就注册：渲染层会在首帧之前同步取档案，
+// 若等到 app ready 里的 registerIpc() 才注册，早执行的那次会取空。
+ipcMain.on('character', (e) => { e.returnValue = characterProfile || loadCharacter(); });
+ipcMain.on('pet-activity', (_e, kind) => { petActivity = String(kind || 'idle'); });
 
 // ---------- 设置持久化 ----------
 // 测试时可用 PET_SETTINGS_PATH 指到临时文件，避免把测试配置写进真实 settings.json
@@ -53,6 +82,7 @@ const settings = {
   city: '南京',
   tts: false,           // 是否语音朗读
   autoMood: true,       // 空闲时自己换状态（环顾/换表情/小跳）
+  wander: true,         // 空闲时自己在桌面上散步（走动 + 步态）
   morningReport: true,  // 每日早报
   reportTime: '08:30',
   lastReportDate: '',
@@ -226,11 +256,13 @@ function sendCursor(force) {
 let dragPoll = null;
 // 拖拽速度采样（用于眩晕）
 let dragSamplePos = null, dragSampleT = 0, fastTicks = 0, dizzySent = false;
+let dragVel = { vx: 0, vy: 0 };       // 最近一次采样的拖拽速度（px/s），松手时用来定落地强度
 let grabOffset = { x: 0, y: 0 };
 function startDrag() {
   if (!win) return;
   if (peeking) unpeek();                 // 缩进去时先探出来再拖
   clearTimeout(peekTimer);
+  endWalk();                             // 正在散步就先停下来，别和拖拽抢窗口位置
   isDragging = true;
   setIgnore(false);                       // 开始拖拽先确保接收指针事件
   const b = win.getBounds();
@@ -250,8 +282,13 @@ function startDrag() {
     // ---- 甩得太快 => 眩晕 ----
     const now = Date.now();
     const dt = Math.max(1, now - dragSampleT);
-    const dist = Math.hypot(cp.x - dragSamplePos.x, cp.y - dragSamplePos.y);
+    const sx = cp.x - dragSamplePos.x;
+    const sy = cp.y - dragSamplePos.y;
+    const dist = Math.hypot(sx, sy);
     const speed = dist * 1000 / dt;
+    // 分轴速度下发给渲染层：横向决定"身体滞后"，纵向决定"被拎起来的拉伸感"
+    dragVel = { vx: sx * 1000 / dt, vy: sy * 1000 / dt };
+    try { win.webContents.send('drag-vel', Math.round(dragVel.vx), Math.round(dragVel.vy)); } catch (_) {}
     dragSamplePos = { x: cp.x, y: cp.y };
     dragSampleT = now;
 
@@ -268,6 +305,10 @@ function endDrag() {
   if (!win) return;
   isDragging = false;
   if (dragPoll) { clearInterval(dragPoll); dragPoll = null; }
+  // 落地反馈：把松手瞬间的竖直速度交给渲染层，速度越大压得越狠。
+  // 这个值必须在窗口吸附/重新定位之前发，否则会被 snapToEdge 的时间吃掉。
+  try { win.webContents.send('land', Math.round(dragVel.vy)); } catch (_) {}
+  dragVel = { vx: 0, vy: 0 };
   const b = win.getBounds();
   lockSize(b.width, b.height);
   snapToEdge();
@@ -365,6 +406,95 @@ function unpeek() {
   peeking = false;
   schedulePeek();
 }
+
+// ---------- 自主散步 ----------
+// 分工：主进程只决定"去哪儿"并推窗口位置；渲染层把收到的位移像素换算成步频。
+// 两边靠"走了多少像素"对齐、不共享时钟，所以拖拽/缩放/掉帧都不会让脚步错位。
+let wanderTimer = null;
+let walkTimer = null;
+let walkRun = null;         // { t0, dur, fromX, toX, y, lastX, accel }
+const walkStats = { starts: 0, steps: 0 };   // 供自动化测试核对链路是否真的跑通
+
+function wanderBlocked() {
+  if (!win || win.isDestroyed() || !win.isVisible()) return true;
+  if (isDragging || peeking) return true;
+  if (settings.clickThrough) return true;      // 穿透模式下乱跑会让人点不到它
+  if (hiddenByFullscreen) return true;
+  if (focusActive()) return true;
+  if (petActivity !== 'idle') return true;     // 正在演动作 / 在睡 / 被拖
+  return false;
+}
+
+function scheduleWander() {
+  clearTimeout(wanderTimer);
+  const wait = WANDER_MIN + Math.random() * (WANDER_MAX - WANDER_MIN);
+  wanderTimer = setTimeout(() => {
+    scheduleWander();                          // 先排下一轮，本次出错也不会断掉循环
+    try { if (settings.wander !== false) startWander(); } catch (e) { logCrash('wander', e); }
+  }, wait);
+}
+
+function startWander() {
+  if (walkRun || wanderBlocked()) return;
+  const b = win.getBounds();
+  const wa = workAreaFor(b);
+  const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
+  const toX = Math.round(wa.x + Math.random() * (maxX - wa.x));
+  if (Math.abs(toX - b.x) < b.width * 0.7) return;   // 太近就不走了，免得原地抽搐
+  startWalkTo(toX);
+}
+
+// 走到指定横坐标（散步和"走两步"共用）。y 不变，只在水平线上移动。
+function startWalkTo(toX) {
+  if (walkRun || !win || win.isDestroyed()) return false;
+  const b = win.getBounds();
+  const wa = workAreaFor(b);
+  const maxX = Math.max(wa.x, wa.x + wa.width - b.width);
+  const target = clamp(Math.round(toX), Math.round(wa.x), Math.round(maxX));
+  if (Math.abs(target - b.x) < 8) return false;
+  const dir = target > b.x ? 1 : -1;
+  const a = Number(characterProfile && characterProfile.gait && characterProfile.gait.accel);
+  walkRun = {
+    t0: Date.now(),
+    dur: animWd.walkDuration(target - b.x, b.width, characterProfile),
+    fromX: b.x, toX: target, y: b.y, lastX: b.x,
+    accel: Number.isFinite(a) ? clamp(a, 0.05, 0.45) : 0.18,
+  };
+  walkStats.starts++;
+  try { win.webContents.send('walk-start', { dir }); } catch (_) {}
+  if (walkTimer) clearInterval(walkTimer);
+  walkTimer = setInterval(walkTick, 16);
+  return true;
+}
+
+function walkTick() {
+  const w = walkRun;
+  if (!w) { endWalk(); return; }
+  if (!win || win.isDestroyed() || isDragging) { endWalk(); return; }
+  const t = clamp((Date.now() - w.t0) / w.dur, 0, 1);
+  const x = Math.round(w.fromX + (w.toX - w.fromX) * animWd.walkEase(t, w.accel));
+  const dx = x - w.lastX;
+  w.lastX = x;
+  if (Math.abs(dx) >= 1) {
+    try { win.setPosition(x, w.y); } catch (_) {}
+    walkStats.steps++;
+    try { win.webContents.send('walk-step', dx); } catch (_) {}
+  }
+  if (t >= 1) endWalk();
+}
+
+function endWalk() {
+  if (walkTimer) { clearInterval(walkTimer); walkTimer = null; }
+  if (!walkRun) return;
+  walkRun = null;
+  try { if (win && !win.isDestroyed()) win.webContents.send('walk-end'); } catch (_) {}
+  try {
+    const nb = win.getBounds();
+    if (Number.isFinite(nb.x)) { settings.pos = { x: nb.x, y: nb.y }; saveSettings(); }
+  } catch (_) {}
+  sendCursor(true);                            // 停下后按当前光标重新定朝向
+}
+
 
 // ---------- 缩放（平滑 + 严格等比）----------
 let zoomTween = null;
@@ -1568,6 +1698,24 @@ function setAutoMood(on) {
   if (win) { try { win.webContents.send('auto-mood', settings.autoMood); } catch (_) {} }
   refreshTray();
 }
+// 自己散步（走动是主进程推窗口，所以开关也放在主进程）
+function setWander(on) {
+  settings.wander = !!on;
+  saveSettings();
+  if (!settings.wander) endWalk();
+  refreshTray();
+}
+// 手动指定一个动作（菜单里的"做个动作"）
+function playGesture(id) {
+  if (!id) return;
+  if (win) { try { win.webContents.send('play-gesture', id); } catch (_) {} }
+}
+function gestureMenu() {
+  const clips = (characterProfile && characterProfile.clips) || [];
+  return clips
+    .filter((c) => !(Array.isArray(c.tags) && c.tags.includes('reaction')))
+    .map((c) => ({ label: c.label || c.id, click: () => playGesture(c.id) }));
+}
 function setOpenAtLogin(on) {  settings.openAtLogin = !!on;
   saveSettings();
   try {
@@ -1622,6 +1770,12 @@ function menuTemplate() {
   t.push({ label: '防打扰（全屏时自动隐藏）', type: 'checkbox', checked: !!settings.antiDisturb, click: () => setAntiDisturb(!settings.antiDisturb) });
   t.push({ label: '开机自启', type: 'checkbox', checked: !!settings.openAtLogin, click: () => setOpenAtLogin(!settings.openAtLogin) });
   t.push({ label: '自动表情（空闲时自己换状态）', type: 'checkbox', checked: settings.autoMood !== false, click: () => setAutoMood(!(settings.autoMood !== false)) });
+  t.push({ label: '自己散步（空闲时在桌面上走动）', type: 'checkbox', checked: settings.wander !== false, click: () => setWander(!(settings.wander !== false)) });
+  t.push({ label: '走两步', click: () => startWander() });
+  {
+    const gm = gestureMenu();
+    if (gm.length) t.push({ label: '做个动作', submenu: gm });
+  }
   t.push({ type: 'separator' });
   t.push({ label: '抽支烟（随机：复活 / 忧郁，30 秒）', click: () => doAction('smoke') });
   t.push({ label: '喝一杯（随机：醉拳 / 大睡，30 秒）', click: () => doAction('drink') });
@@ -1647,6 +1801,7 @@ function petContextMenu() {
 
 // ---------- IPC ----------
 function registerIpc() {
+  ipcMain.on('stop-walk', () => endWalk());
   ipcMain.on('drag-start', () => startDrag());
   ipcMain.on('drag-end', () => endDrag());
   ipcMain.on('zoom-by', (_e, factor) => {
@@ -1849,6 +2004,110 @@ async function testDrag() {
 }
 
 // ---------- 主窗口 ----------
+// 自动化走动测试：验证 主进程推窗口 -> walk-step 下发 -> 渲染层步频 这条链路真的通了
+// 用法：PET_TEST_WALK=<日志路径> PET_SETTINGS_PATH=<临时设置> electron . --user-data-dir=<临时目录>
+async function testWalk() {
+  const out = process.env.PET_TEST_WALK;
+  await sleep(2200);
+  if (!win) { console.log('[walk] no window'); app.exit(1); return; }
+  const lines = [];
+  const b0 = win.getBounds();
+  lines.push('before x=' + b0.x + ' y=' + b0.y + ' ' + b0.width + 'x' + b0.height);
+  const target = b0.x - 260;                       // 往左走一段
+  const ok = startWalkTo(target);
+  lines.push('started=' + ok + ' target=' + target);
+  const t0 = Date.now();
+  let lastX = b0.x, lastY = b0.y, drift = 0;
+  let sampled = 0;
+  const probe = async (tag) => {
+    try {
+      const dbg = await win.webContents.executeJavaScript(
+        'JSON.stringify({steps: Math.round(window.__petAnim.stepCount*100)/100,' +
+        ' phase: Math.round((window.__petAnim.stepCount%1)*100)/100,' +
+        ' dist: Math.round(window.__petAnim.walkDistance),' +
+        ' walking: window.__petAnim.walking, state: window.__petAnim.state,' +
+        ' frame: window.__petAnim.pose.frame,' +
+        ' rot: Math.round(window.__petAnim.pose.rot*100)/100,' +
+        ' dy: Math.round(window.__petAnim.pose.dy*10000)/10000})');
+      lines.push(tag + ' renderer=' + dbg);
+      if (process.env.PET_TEST_WALK_SHOTS) {
+        const img = await win.webContents.capturePage();
+        fs.writeFileSync(path.resolve(process.env.PET_TEST_WALK) + '.' + tag + '.png', img.toPNG());
+        lines.push(tag + ' shot=' + img.getSize().width + 'x' + img.getSize().height);
+      }
+    } catch (e) { lines.push(tag + ' renderer_err=' + (e && e.message)); }
+  };
+  while (Date.now() - t0 < 4200) {
+    await sleep(120);
+    const nb = win.getBounds();
+    if (nb.y !== lastY) { drift++; lastY = nb.y; }
+    lines.push('t=' + (Date.now() - t0) + ' x=' + nb.x + ' dx=' + (nb.x - lastX));
+    lastX = nb.x;
+    // 走动过程中取样：走完相位会被清零，只有中途读才看得到脚步。
+    // 间隔取 1/4 步周期，才能截到"抬脚最高"和"落脚最低"两个极端姿态。
+    if (sampled < 6 && Date.now() - t0 > 300 + sampled * 130) {
+      await probe('mid' + sampled);
+      sampled++;
+    }
+  }
+  const bf = win.getBounds();
+  await probe('after');
+  lines.push('stats starts=' + walkStats.starts + ' steps=' + walkStats.steps);
+  lines.push('moved=' + (bf.x - b0.x) + ' walkRun=' + (walkRun ? 'active' : 'ended'));
+  lines.push('y_unchanged=' + (bf.y === b0.y) + ' y_drift_events=' + drift + ' y0=' + b0.y + ' y1=' + bf.y);
+  fs.writeFileSync(out, lines.join('\n') + '\n');
+  console.log('[walk] wrote ' + out);
+  app.exit(0);
+}
+
+// 自动化动作测试：PET_TEST_CLIP=<动作 id> 在真机上播一次并采样姿态，
+// 用来确认"动作表 -> 引擎 -> DOM"这条链在渲染层真的成立（单测只覆盖到引擎）。
+async function testClip() {
+  const id = process.env.PET_TEST_CLIP;
+  await sleep(2000);
+  if (!win) { app.exit(1); return; }
+  const lines = [];
+  const started = await win.webContents.executeJavaScript(
+    'window.__petAnim.play(' + JSON.stringify(id) + ', {force:true})');
+  lines.push('play(' + id + ')=' + started);
+  for (let i = 0; i < 16; i++) {
+    await sleep(80);
+    const s = await win.webContents.executeJavaScript(
+      'JSON.stringify({clip: window.__petAnim.clipId, state: window.__petAnim.state,' +
+      ' frame: window.__petAnim.pose.frame,' +
+      ' dy: Math.round(window.__petAnim.pose.dy*10000)/10000,' +
+      ' rot: Math.round(window.__petAnim.pose.rot*100)/100,' +
+      ' sy: Math.round(window.__petAnim.pose.sy*10000)/10000})');
+    lines.push('t=' + (i * 80) + ' ' + s);
+  }
+  console.log('[clip] ' + lines.join('\n[clip] '));
+  app.exit(0);
+}
+
+// 自动化点击测试：PET_TEST_TAP=head|body，注入一次不移动的点击，
+// 验证"命中盒 -> 分区反应"这条链（点头摸头、点身子被戳）。
+async function testTap() {
+  const zone = process.env.PET_TEST_TAP;
+  await sleep(2000);
+  if (!win) { app.exit(1); return; }
+  const b = win.getBounds();
+  const cx = Math.round(b.width / 2);
+  const cy = Math.round(b.height * (zone === 'head' ? 0.26 : 0.80));
+  const lines = ['zone=' + zone + ' click@' + cx + ',' + cy];
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: cx, y: cy, button: 'left', clickCount: 1 });
+  await sleep(60);
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: cx, y: cy, button: 'left', clickCount: 1 });
+  for (let i = 0; i < 8; i++) {
+    await sleep(90);
+    const s = await win.webContents.executeJavaScript(
+      'JSON.stringify({clip: window.__petAnim.clipId, state: window.__petAnim.state,' +
+      ' frame: window.__petAnim.pose.frame, sy: Math.round(window.__petAnim.pose.sy*10000)/10000})');
+    lines.push('t=' + (i * 90) + ' ' + s);
+  }
+  console.log('[tap] ' + lines.join('\n[tap] '));
+  app.exit(0);
+}
+
 function createWindow() {
   const z = clamp(settings.zoom || 1, ZOOM_MIN, ZOOM_MAX);
   const init = sizeForZoom(z);
@@ -1875,6 +2134,18 @@ function createWindow() {
   });
   win.loadFile('index.html');
   win.setAlwaysOnTop(true, 'pop-up-menu');
+
+  // 自动化测试时把渲染层的 console / 崩溃原因落盘。
+  // 渲染层一旦抛错，画面只会静默不动，光看主进程日志根本查不出来。
+  if (process.env.PET_TEST_WALK) {
+    const clog = path.resolve(process.env.PET_TEST_WALK) + '.console.log';
+    const put = (s) => { try { fs.appendFileSync(clog, s + '\n'); } catch (_) {} };
+    put('--- load ' + new Date().toISOString());
+    win.webContents.on('console-message', (_e, level, message) => put('[' + level + '] ' + message));
+    win.webContents.on('render-process-gone', (_e, d) => put('[gone] ' + JSON.stringify(d)));
+    win.webContents.on('preload-error', (_e, p, err) => put('[preload] ' + p + ' ' + (err && err.message)));
+    win.webContents.on('did-fail-load', (_e, code, desc) => put('[fail] ' + code + ' ' + desc));
+  }
 
   try {
     const wa = screen.getPrimaryDisplay().workArea;
@@ -1951,6 +2222,9 @@ if (!gotTheLock) {
     if (tray) { try { win.setSkipTaskbar(true); } catch (_) {} }
     setInterval(hitTick, 30);   // 像素命中判定：20~33fps 校正一次
     if (process.env.PET_TEST_DRAG) testDrag();
+    if (process.env.PET_TEST_WALK) testWalk();
+    if (process.env.PET_TEST_CLIP) testClip();
+    if (process.env.PET_TEST_TAP) testTap();
     if (process.env.PET_TEST_EMOTION) {
       setTimeout(() => emitEmotion('angry'), 2200);
       setTimeout(async () => {
@@ -2284,12 +2558,15 @@ if (!gotTheLock) {
     }
     registerIpc();
     setClickThrough(settings.clickThrough);
-    startIdleWatch();
+    // 走动/动作自动化测试要保持清醒：本机无人操作时系统会判定空闲，宠物会自己睡着，
+    // 睡着会打断散步，测试结果就不可复现了（和 PET_TEST_GAZE 关掉朝向轮询同一个道理）。
+    if (!process.env.PET_TEST_WALK && !process.env.PET_TEST_CLIP) startIdleWatch();
     startGreetingWatch();
     startClipWatch();
     startScheduleWatch();
     startMorningWatch();
     startDailyWatch();
+    scheduleWander();
     if (settings.antiDisturb) startAntiDisturb();
     try {
       app.setLoginItemSettings({
@@ -2333,6 +2610,8 @@ if (!gotTheLock) {
     try { if (facingTimer) clearInterval(facingTimer); } catch (_) {}
     try { if (focusTimer) clearInterval(focusTimer); } catch (_) {}
     try { if (dragPoll) clearInterval(dragPoll); } catch (_) {}
+    try { if (wanderTimer) clearTimeout(wanderTimer); } catch (_) {}
+    try { if (walkTimer) clearInterval(walkTimer); } catch (_) {}
     try { if (zoomTween) clearInterval(zoomTween); } catch (_) {}
     stopAntiDisturb();
   });

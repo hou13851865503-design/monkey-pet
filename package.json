@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node launcher.js",
     "dist": "electron-builder",
-    "test": "node tools/test-wb.cjs && node tools/test-paper.cjs && node tools/test-daily.cjs",
+    "test": "node tools/test-anim.cjs && node tools/test-wb.cjs && node tools/test-paper.cjs && node tools/test-daily.cjs",
     "test:live": "node tools/test-wb-live.cjs"
   },
   "author": "",
@@ -36,6 +36,8 @@
       "daily.js",
       "paper.js",
       "wb.js",
+      "anim.js",
+      "character.json",
       "launcher.js",
       "tools/**/*",
       "assets/**/*"
