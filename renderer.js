@@ -139,10 +139,40 @@
   }
 
   // ---- 抽烟 / 喝酒：30 秒，随机两种结局 ----
+  // 真实感的关键不在"转得多顺"，而在**节拍**：真人抽烟是「吸一口(1s) → 屏住(1~2s) →
+  // 仰头吐(1s) → 发很久呆(5~10s)」，不是从头到尾匀速循环。所以下面用时间轴驱动，
+  // 每一拍只做一件小事，拍与拍之间留长空档。
   function isBusy() { return Date.now() < dizzyUntil || Date.now() < actionUntil; }
 
+  let beatTimers = [];
+  let burnTimer = null;
+  const pulseTimers = {};
+  function cue(ms, fn) { beatTimers.push(setTimeout(() => { try { fn(); } catch (_) {} }, ms)); }
+  function clearBeats() {
+    beatTimers.forEach(clearTimeout); beatTimers = [];
+    Object.keys(pulseTimers).forEach((k) => { clearTimeout(pulseTimers[k]); delete pulseTimers[k]; });
+    clearInterval(burnTimer); burnTimer = null;
+  }
+  // 只亮/只生效 ms 毫秒的临时 class —— 一拍一个。
+  // 同一个 class 反复喊（比如连灌三口）要"续时长"而不是互相取消，否则会闪。
+  function pulse(cls, ms) {
+    clearTimeout(pulseTimers[cls]);
+    document.body.classList.add(cls);
+    pulseTimers[cls] = setTimeout(() => {
+      delete pulseTimers[cls];
+      document.body.classList.remove(cls);
+    }, ms);
+  }
+  function setVar(k, v) { document.body.style.setProperty(k, v); }
+
   function clearAction() {
-    document.body.classList.remove('drunk', 'asleep', 'smoking', 'blue', 'revive', 'drinking');
+    clearBeats();
+    document.body.classList.remove(
+      'drunk', 'drunk2', 'asleep', 'nod', 'smoking', 'blue', 'revive', 'drinking',
+      'sip', 'tiltback', 'slump', 'ember', 'puffing', 'ash-tap'
+    );
+    setVar('--burn', 0);
+    setVar('--sip', 0);
     actionUntil = 0;
   }
 
@@ -153,11 +183,89 @@
     classes.split(' ').forEach((c) => { if (c) document.body.classList.add(c); });
     state = 'action';
     show(frame);
+    // 动作期间目光落在远处，不再跟着鼠标转（忧郁的前提是"望远方"）
+    tiltTarget.ry = 7; tiltTarget.rx = 2;
     actionUntil = Date.now() + ms;
     actionTimer = setTimeout(() => {
       clearAction();
+      tiltTarget.ry = 0; tiltTarget.rx = 0;
       enter(focusing ? 'focus' : 'idle');
     }, ms);
+  }
+
+  // 烟：30 秒内烧掉约 40%。基础是极慢的阴燃，每吸一口再跳掉一小截
+  let burnCur = 0;
+  function smokeBurn(limit) {
+    clearInterval(burnTimer);
+    burnCur = 0;
+    setVar('--burn', 0);
+    burnTimer = setInterval(() => {
+      burnCur += 0.006;                      // 每秒约 2%
+      if (burnCur > limit) { burnCur = limit; clearInterval(burnTimer); burnTimer = null; }
+      setVar('--burn', burnCur.toFixed(3));
+    }, 300);
+  }
+  function bumpBurn(n) {
+    burnCur = Math.min(0.55, burnCur + n);
+    setVar('--burn', burnCur.toFixed(3));
+  }
+
+  // 抽烟：一口 = 吸 → 屏 → 仰头吐 → 发呆
+  function smokeBeats(blue) {
+    if (blue) document.body.classList.add('blue');
+    smokeBurn(0.42);
+    // 第 n 口：间隔越来越长（越抽越沉），吐烟也越来越慢
+    // 注意：全程只用一张脸 —— 道具（烟）是按这张脸的嘴角定位的，
+    // 中途换脸会让烟飘到鼻子上去。
+    const puff = (t, hold) => {
+      cue(t, () => { pulse('ember', 950); });     // 吸：烟头骤亮
+      cue(t + 400, () => bumpBurn(0.045));        // 吸掉一截
+      cue(t + 900, () => pulse('slump', 700));    // 闷一下，肩膀沉
+      cue(t + hold, () => {                       // 吐：仰头 + 三口烟涌出
+        pulse('puffing', 2300);
+        pulse('tiltback', 1500);
+      });
+    };
+    puff(300, 2100);
+    puff(9200, 2400);
+    puff(18800, 2700);
+    cue(14200, () => pulse('ash-tap', 1200));    // 弹灰
+    cue(25600, () => pulse('ash-tap', 1200));
+    cue(26500, () => { pulse('slump', 2600); }); // 结尾垮下肩，把忧郁落到身体上
+    if (!blue) {
+      // 满血复活是"抽完之后"的事：先把烟丢掉，再一下子精神起来
+      cue(26600, () => {
+        document.body.classList.remove('smoking');
+        document.body.classList.add('revive');
+        show('e_cheer');
+      });
+    }
+  }
+
+  // 喝酒：一次 = 举瓶 → 灌（三下咕咚）→ 放下 → 回味
+  function drinkBeats(drunk) {
+    document.body.classList.add('drinking');
+    show('e_sleepy');                    // 真喝醉的人不会瞪大眼
+    if (!drunk) cue(6000, () => document.body.classList.add('nod'));
+    const gulp = (t, hold, sip) => {
+      cue(t, () => { pulse('sip', hold + 900); });               // 举瓶（1.15s 缓动抬起）
+      cue(t + 650, () => setVar('--sip', sip));                   // 液面下降
+      for (let k = 0; k < 3; k++) {                               // 咕咚：瓶子跟着起伏
+        cue(t + 900 + (hold / 3) * k, () => pulse('tiltback', hold / 3 + 220));
+      }
+      cue(t + hold + 800, () => pulse('slump', 1400));            // 放下后回一口气
+    };
+    gulp(400, 2000, 0.22);
+    gulp(8200, 2100, 0.46);
+    gulp(16400, 2200, 0.72);
+    if (drunk) {
+      gulp(23800, 1900, 0.9);                                     // 醉的那条线还有第四口
+      cue(15500, () => document.body.classList.add('drunk'));      // 前 15 秒还是清醒的
+      cue(27500, () => document.body.classList.add('drunk2'));     // 后段晃得更厉害
+    } else {
+      // 困的那条线：喝到第三口就不喝了，慢慢打瞌睡（睡着还举着瓶子很假）
+      cue(21400, () => { document.body.classList.remove('nod'); document.body.classList.add('asleep'); });
+    }
   }
 
   function startAction(type) {
@@ -166,18 +274,14 @@
     const kind = parts[0];
     const force = parts[1] || '';
     if (kind === 'drink') {
-      if (force === 'drunk' || (!force && Math.random() < 0.55)) {
-        setAction('drinking drunk', 30000, 'e_shy');        // 打醉拳：左右晃悠
-      } else {
-        setAction('drinking asleep', 30000, 'e_sleepy');    // 呼呼大睡
-      }
+      const drunk = force === 'drunk' || (!force && Math.random() < 0.55);
+      setAction('drinking', 30000, 'e_sleepy');   // 结局在时间轴里逐步长出来
+      drinkBeats(drunk);
     } else if (kind === 'smoke') {
-      if (force === 'revive' || (!force && Math.random() < 0.5)) {
-        setAction('smoking revive', 30000, 'e_cheer');   // 满血复活
-        setTimeout(() => document.body.classList.remove('revive'), 1500);
-      } else {
-        setAction('smoking blue', 30000, 'e_sad');       // 忧郁
-      }
+      const blue = force === 'blue' || (force !== 'revive' && Math.random() < 0.5);
+      // 全程都是同一张"抿着嘴发闷"的脸；满血复活的脸留到最后 3 秒才换
+      setAction('smoking', 30000, 'e_sad');
+      smokeBeats(blue);
     }
   }
   function scheduleBlink() {
@@ -257,6 +361,8 @@
   function handleCursor(dx, dy) {
     if (state === 'sleepy') enter('idle');
     lastCursorAt = Date.now();
+    // 抽烟/喝酒期间不跟鼠标：头保持"望向远处"的固定偏移，否则一边忧郁一边追光标很分裂
+    if (Date.now() < actionUntil) return;
     // 满量程 = 窗口宽/高的 2.4 倍（约 260px）：近处正脸、稍远微转、很远才侧面
     const nx = clamp(dx / (Math.max(60, window.innerWidth) * 2.4), -1, 1);
     const ny = clamp(dy / (Math.max(60, window.innerHeight) * 2.4), -1, 1);

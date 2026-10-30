@@ -1480,16 +1480,38 @@ if (!gotTheLock) {
       }, 3000);
     }
     if (process.env.PET_TEST_ACTION) {
-      setTimeout(() => { try { win.webContents.send('do-action', process.env.PET_TEST_ACTION); } catch (_) {} }, 1600);
-      setTimeout(() => { try { win.webContents.send('cursor', 320, 0); } catch (_) {} }, 2000);
-      setTimeout(async () => {
-        try {
-          const img = await win.webContents.capturePage();
-          fs.writeFileSync(process.env.PET_TEST_ACTION_OUT, img.toPNG());
-          console.log('[action] captured ' + process.env.PET_TEST_ACTION);
-        } catch (e) { console.log('[action] err ' + e.message); }
-        app.exit(0);
-      }, 2700);
+      const T0 = 1600;
+      setTimeout(() => { try { win.webContents.send('do-action', process.env.PET_TEST_ACTION); } catch (_) {} }, T0);
+      setTimeout(() => { try { win.webContents.send('cursor', 320, 0); } catch (_) {} }, T0 + 400);
+      // PET_TEST_SHOTS="900,2600,4200" => 动作开始后这些毫秒各截一张，后缀 _900 等
+      const shots = (process.env.PET_TEST_SHOTS || '').split(',').map(Number).filter((n) => n > 0);
+      const OUT = process.env.PET_TEST_ACTION_OUT;
+      if (shots.length) {
+        shots.forEach((ms) => {
+          setTimeout(async () => {
+            try {
+              const img = await win.webContents.capturePage();
+              fs.writeFileSync(OUT.replace(/\.png$/i, '') + '_' + ms + '.png', img.toPNG());
+              const dbg = await win.webContents.executeJavaScript(
+                '(() => { const i = document.querySelector("#smoke i"); const cs = getComputedStyle(i);' +
+                ' return { cls: document.body.className, op: cs.opacity, tr: cs.transform,' +
+                ' w: cs.width, bg: cs.backgroundImage.slice(0, 40), anim: cs.animationName }; })()'
+              );
+              console.log('[action] shot ' + ms + ' ' + JSON.stringify(dbg));
+            } catch (e) { console.log('[action] err ' + e.message); }
+          }, T0 + ms);
+        });
+        setTimeout(() => app.exit(0), T0 + Math.max.apply(null, shots) + 900);
+      } else {
+        setTimeout(async () => {
+          try {
+            const img = await win.webContents.capturePage();
+            fs.writeFileSync(OUT, img.toPNG());
+            console.log('[action] captured ' + process.env.PET_TEST_ACTION);
+          } catch (e) { console.log('[action] err ' + e.message); }
+          app.exit(0);
+        }, 2700);
+      }
     }
     if (process.env.PET_TEST_GAZE) {
       setTimeout(async () => {

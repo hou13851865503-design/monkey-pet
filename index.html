@@ -22,6 +22,21 @@
     /* 伪 3D 透视倾斜层（JS 每帧更新 transform） */
     #tilt { position: absolute; inset: 0; will-change: transform; }
 
+    /* 姿态层：醉拳摇摆 / 瞌睡点头 / 忧郁垮肩。
+       单独一层，避免和 #tilt(鼠标透视)、#breath(呼吸) 抢同一个 transform */
+    #pose { position: absolute; inset: 0; transform-origin: 50% 94%; will-change: transform; }
+
+    /* 前倾/仰头层：仰头灌酒、吐烟仰头、呼气下沉。用 transition 而非 animation，
+       所以"举瓶—仰头—放下"是一条连续的缓动曲线，不是硬切 */
+    #lean {
+      position: absolute; inset: 0;
+      transform-origin: 50% 96%;
+      transition: transform .85s cubic-bezier(.3, .84, .35, 1);
+    }
+    body.sip      #lean { transform: rotate(-6.5deg) translateY(1.4%); }   /* 仰头灌 */
+    body.tiltback #lean { transform: rotate(-3.2deg) translateY(.5%); }    /* 吐烟轻仰 */
+    body.slump    #lean { transform: translateY(1.7%) scaleY(.98); }       /* 呼气下沉 */
+
     /* 呼吸动画层 */
     #breath {
       position: absolute; inset: 0;
@@ -109,52 +124,119 @@
     }
     .eye svg { width: 90%; height: 90%; animation: dizzySpin .9s linear infinite; }
 
-    /* ---- 抽烟：香烟 + 烟圈 ---- */
-    #cig, #smoke, #zzz, #burst {
+    /* ---- 抽烟：叼在嘴角的烟，会随呼吸变亮、随燃烧变短、会弹灰 ---- */
+    #cig, #bottle, #smoke, #zzz, #burst {
       position: absolute; pointer-events: none; opacity: 0;
       transition: opacity .18s ease;
     }
     #cig {
-      left: 57%; top: 57%;
-      width: 2.6%; height: 11%;
-      background: linear-gradient(#fdfdfd 74%, #ff8a3d 74%);
-      border-radius: 1px;
-      transform-origin: bottom center;
-      transform: rotate(26deg);
-      z-index: 5;
-      box-shadow: 0 0 2px rgba(0, 0, 0, .3);
+      /* 锚点 = e_sad 那张脸的嘴角（抽烟全程只用这一张脸，道具才不会飘） */
+      left: 55.5%; top: 62.5%;
+      width: 3%;
+      /* 30 秒里烧掉约 40%：--burn 由 JS 按"一口一口"推进，不是等速 */
+      height: calc(17% - var(--burn, 0) * 6.5%);
+      transform: translate(-50%, -100%) rotate(26deg);
+      transform-origin: 50% 100%;
+      background: linear-gradient(#f8f5ec 0 64%, #e6dfd1 64% 88%, #cdc5b5 88% 100%);
+      border-radius: 1.5px;
+      z-index: 6;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+      transition: height .8s linear, opacity .18s ease;
     }
     body.smoking #cig { opacity: 1; }
 
-    /* 酒瓶：喝的时候出现在嘴左侧 */
+    /* 燃点：平时微暗地"呼吸"，吸气那一下骤亮 —— 真实烟头的明暗就是这个节奏 */
+    #cig::before {
+      content: ''; position: absolute; top: -5%; left: -36%;
+      width: 172%; height: 22%; border-radius: 50%;
+      background: radial-gradient(circle at 50% 55%, #ffe2b4 0 26%, #ff7c2c 58%, #a83a0c 100%);
+      box-shadow: 0 0 4px rgba(255, 120, 40, .85);
+      animation: emberPulse 7s ease-in-out infinite;
+    }
+    body.ember #cig::before { animation: emberSuck .95s cubic-bezier(.3, .7, .3, 1); }
+    @keyframes emberPulse {
+      0%, 100% { opacity: .48; filter: brightness(.85); }
+      40%      { opacity: .78; filter: brightness(1.05); }
+    }
+    @keyframes emberSuck {
+      0%   { opacity: .48; filter: brightness(.9); }
+      32%  { opacity: 1; filter: brightness(2.1) saturate(1.4);
+             box-shadow: 0 0 10px rgba(255, 145, 55, 1); }
+      100% { opacity: .62; filter: brightness(1); }
+    }
+
+    /* 烟灰：长在燃烧端（烟的子元素，所以永远跟着烟走），越抽越长，弹一下就清空 */
+    #cig i {
+      position: absolute; top: 0; left: -4%; width: 108%;
+      height: calc(var(--burn, 0) * 62%);
+      background: linear-gradient(#9a9388, #6b6459);
+      border-radius: 1.5px 1.5px 0 0;
+      opacity: .8;
+      transition: height .35s linear, opacity .3s ease, transform .3s ease;
+    }
+    body.ash-tap #cig i { opacity: 0; transform: translate(14%, 26%) scale(.8); }
+
+    /* 酒瓶：支点放在**瓶口**（嘴巴），所以"举瓶"是绕着嘴翻上去，
+       而不是整只瓶子从别处平移过来 —— 这是它看起来不违和的关键。
+       锚点 = e_sleepy 那张脸的嘴（喝酒全程只用这一张脸）。
+       结构：::after=瓶颈(0~24%)，::before=瓶身(24~100%)，i=酒液 */
     #bottle {
-      position: absolute; pointer-events: none; opacity: 0;
-      transition: opacity .18s ease;
-      left: 44%; top: 55%;
-      width: 4.6%; height: 14%;
-      background: linear-gradient(#8fd08a 0 18%, #4a8f4a 18% 30%, #b9812f 30% 100%);
-      border-radius: 2px 2px 3px 3px;
-      transform-origin: bottom center;
-      transform: rotate(-28deg);
-      z-index: 5;
-      box-shadow: 0 0 2px rgba(0, 0, 0, .35);
+      left: 53%; top: 65%;
+      width: 9%; height: 19%;
+      transform-origin: 50% 0;
+      /* 闲置时整瓶往下降一点，瓶口离开嘴唇（不然像长在下唇上） */
+      transform: translate(-50%, 5%) rotate(12deg);
+      z-index: 6;
+      transition: transform 1.15s cubic-bezier(.33, .86, .36, 1), opacity .18s ease;
     }
     body.drinking #bottle { opacity: 1; }
-    #smoke { left: 58%; top: 38%; width: 26%; height: 30%; z-index: 5; }
-    body.smoking #smoke { opacity: .9; }
-    #smoke i {
-      position: absolute; bottom: 0; left: 0;
-      width: 16%; aspect-ratio: 1 / 1; border-radius: 50%;
-      background: rgba(255, 255, 255, .6);
-      filter: blur(1.2px);
-      animation: puffUp 3.2s linear infinite;
+    /* 仰灌：绕瓶口翻转 138°，瓶底翘向右上方（液体正好压到瓶口） */
+    body.sip #bottle { transform: translate(-50%, -1%) rotate(-138deg); }
+    #bottle::before {
+      content: ''; position: absolute; top: 24%; left: 0;
+      width: 100%; height: 76%;
+      background: linear-gradient(100deg, rgba(216, 228, 216, .95) 0 20%, rgba(166, 184, 166, .92) 20% 100%);
+      border-radius: 2px 2px 5px 5px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .42), inset -1px 0 2px rgba(255, 255, 255, .35);
     }
-    #smoke i:nth-child(2) { left: 32%; animation-delay: 1.05s; }
-    #smoke i:nth-child(3) { left: 62%; animation-delay: 2.1s; }
+    #bottle::after {
+      content: ''; position: absolute; top: 0; left: 32%;
+      width: 36%; height: 26%;
+      background: linear-gradient(100deg, #d7e3d7 0 30%, #aebfae 30% 100%);
+      border-radius: 1px;
+      box-shadow: inset -1px 0 1px rgba(255, 255, 255, .4);
+    }
+    #bottle i {
+      position: absolute; left: 8%; bottom: 3%; width: 84%;
+      height: calc((1 - var(--sip, 0)) * 72%);
+      border-radius: 0 0 4px 4px;
+      background: linear-gradient(#c08a33, #8a5a1c);
+      transition: height 1.1s ease;
+    }
+
+    /* 烟圈：只在"吐"的那一拍喷出来，先急后缓（原来匀速上升是假感主因） */
+    #smoke { left: 44%; top: 6%; width: 56%; height: 62%; z-index: 7; }
+    body.smoking #smoke { opacity: 1; }
+    #smoke i {
+      position: absolute; bottom: 0; left: 30%;
+      width: 24%; aspect-ratio: 1 / 1; border-radius: 50%;
+      /* 灰蓝调而不是纯白：浅色桌面上纯白等于看不见 */
+      background: radial-gradient(circle at 40% 36%,
+        rgba(255, 255, 255, .97) 0 22%,
+        rgba(206, 213, 226, .62) 56%,
+        rgba(188, 196, 212, .12) 100%);
+      filter: blur(1.1px) drop-shadow(0 1px 1px rgba(70, 80, 100, .22));
+      opacity: 0;
+      will-change: transform, opacity;
+    }
+    body.puffing #smoke i { animation: puffUp 2.3s cubic-bezier(.14, .7, .28, 1) forwards; }
+    body.puffing #smoke i:nth-child(2) { animation-delay: .14s; }
+    body.puffing #smoke i:nth-child(3) { animation-delay: .3s; }
     @keyframes puffUp {
-      0%   { transform: translateY(0) scale(.5); opacity: 0; }
-      18%  { opacity: .85; }
-      100% { transform: translateY(-240%) scale(1.9); opacity: 0; }
+      0%   { transform: translate(0, 0) scale(.32);           opacity: 0; }
+      8%   { transform: translate(14%, -8%) scale(.85);        opacity: .58; }  /* 一口涌出 */
+      45%  { transform: translate(78%, -132%) scale(1.85);     opacity: .24; }
+      100% { transform: translate(152%, -260%) scale(2.6);     opacity: 0; }
     }
 
     /* ---- 睡着：Z z z ---- */
@@ -174,16 +256,39 @@
       100% { transform: translateY(-200%) translateX(40%) scale(1.2); opacity: 0; }
     }
 
-    /* ---- 醉拳式晃悠 ---- */
-    @keyframes drunkSway {
-      0%, 100% { transform: rotate(-8deg) translateX(-3%); }
-      25%      { transform: rotate(7deg)  translateX(3%) translateY(-2%); }
-      50%      { transform: rotate(-6deg) translateX(-2%) translateY(1%); }
-      75%      { transform: rotate(9deg)  translateX(4%) translateY(-1%); }
+    /* ---- 忧郁：垮肩下沉（缓慢，像叹气）+ 褪色 ---- */
+    @keyframes poseSlump {
+      0%, 100% { transform: translateY(.4%) scaleY(.992) rotate(0deg); }
+      50%      { transform: translateY(1.2%) scaleY(.972) rotate(-.7deg); }
     }
-    body.drunk #breath { animation: drunkSway 1.9s ease-in-out infinite; }
+    body.blue #pose { animation: poseSlump 7s ease-in-out infinite; }
 
-    /* ---- 忧郁：褪色 ---- */
+    /* ---- 醉拳式晃悠：不是匀速左右摆，而是"歪过去—强撑—慢慢回—再歪" ---- */
+    /* 关键帧间隔刻意不相等（10%/19%/34%/52%/58%），才有立足不稳的随机感 */
+    @keyframes poseSway {
+      0%   { transform: rotate(-2deg)  translateX(-1%); }
+      10%  { transform: rotate(6deg)   translateX(2.6%) translateY(-1%); }
+      19%  { transform: rotate(5.2deg) translateX(2.2%); }
+      34%  { transform: rotate(-.6deg) translateX(0) translateY(.6%); }
+      52%  { transform: rotate(-7deg)  translateX(-3%) translateY(.4%); }
+      58%  { transform: rotate(-6deg)  translateX(-2.6%) translateY(1.2%); }
+      72%  { transform: rotate(1.2deg) translateX(.6%) translateY(-.4%); }
+      86%  { transform: rotate(2.4deg) translateX(1%); }
+      100% { transform: rotate(-2deg)  translateX(-1%); }
+    }
+    body.drunk #pose { animation: poseSway 4.8s cubic-bezier(.42, 0, .58, 1) infinite; }
+    body.drunk2 #pose { animation-duration: 3.2s; }   /* 越喝越晃 */
+
+    /* ---- 困：一点点低头 → 猛地惊醒 → 再慢慢垂下去 ---- */
+    @keyframes poseNod {
+      0%, 26% { transform: rotate(0deg) translateY(0); }
+      52%     { transform: rotate(3.4deg) translateY(1.5%) scaleY(.988); }
+      60%     { transform: rotate(3.8deg) translateY(2%) scaleY(.982); }
+      70%     { transform: rotate(-.6deg) translateY(-.3%); }
+      100%    { transform: rotate(0deg) translateY(0); }
+    }
+    body.nod #pose { animation: poseNod 5.8s ease-in-out infinite; }
+
     body.blue #breath { filter: grayscale(.75) brightness(.86) drop-shadow(0 4px 10px rgba(0, 0, 0, .42)); }
 
     /* ---- 满血复活：一圈光 ---- */
@@ -212,17 +317,17 @@
         <circle cx="32" cy="32" r="2.6" fill="#ffd54a"/>
       </svg>
     </div>
-    <div id="tilt"><div id="breath">
+    <div id="tilt"><div id="pose"><div id="lean"><div id="breath">
       <div id="eyes">
         <i class="eye" style="left:44.86%; top:47.43%"></i>
         <i class="eye" style="left:66.31%; top:47.47%"></i>
       </div>
-      <div id="cig"></div>
-      <div id="bottle"></div>
+      <div id="cig"><i></i></div>
+      <div id="bottle"><i></i></div>
       <div id="smoke"><i></i><i></i><i></i></div>
       <div id="zzz"><b>Z</b><b>Z</b><b>Z</b></div>
       <div id="burst"></div>
-    </div></div>
+    </div></div></div></div>
   </div>
   <script src="renderer.js"></script>
 </body>
