@@ -2251,8 +2251,13 @@ if (!gotTheLock) {
               fs.writeFileSync(OUT.replace(/\.png$/i, '') + '_' + ms + '.png', img.toPNG());
               const dbg = await win.webContents.executeJavaScript(
                 '(() => { const i = document.querySelector("#smoke i"); const cs = getComputedStyle(i);' +
+                ' const c = document.querySelector("#cig"); const cc = getComputedStyle(c);' +
+                ' const rs = getComputedStyle(document.documentElement);' +
                 ' return { cls: document.body.className, op: cs.opacity, tr: cs.transform,' +
-                ' w: cs.width, bg: cs.backgroundImage.slice(0, 40), anim: cs.animationName }; })()'
+                ' w: cs.width, bg: cs.backgroundImage.slice(0, 40), anim: cs.animationName,' +
+                ' cig: { tf: cc.transform, h: cc.height, w: cc.width, left: cc.left, top: cc.top },' +
+                ' tip: [rs.getPropertyValue("--cig-tip-x").trim(), rs.getPropertyValue("--cig-tip-y").trim()],' +
+                ' frame: (document.querySelector("img.f.active") || {}).src }; })()'
               );
               console.log('[action] shot ' + ms + ' ' + JSON.stringify(dbg));
             } catch (e) { console.log('[action] err ' + e.message); }

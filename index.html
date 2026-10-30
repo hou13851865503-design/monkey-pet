@@ -139,20 +139,27 @@
       transition: opacity .18s ease;
     }
     #cig {
-      /* 锚点 = e_sad 那张脸的嘴角（抽烟全程只用这一张脸，道具才不会飘） */
-      left: 55.5%; top: 62.5%;
-      width: 3%;
-      /* 30 秒里烧掉约 40%：--burn 由 JS 按"一口一口"推进，不是等速 */
-      height: calc(17% - var(--burn, 0) * 6.5%);
-      transform: translate(-50%, -100%) rotate(26deg);
+      /* 几何全部来自 character.json 的 props.cig（换形象要重量，见档案里的 _propsComment）。
+         这支烟是"横着斜出去"叼的，不是竖着往上 —— 这只猴子嘴到眼睛之间只有 8% 的
+         竖直空间，烟一竖起来就会顶到眼睛，看着像烟烧进眼眶里。 */
+      left: var(--cig-x, 54.5%); top: var(--cig-y, 62.2%);
+      width: var(--cig-w, 2.8%);
+      /* 30 秒里烧掉约 40%：--burn 由 JS 按"一口一口"推进，不是等速。
+         烧短是从火头那头退的（支点在嘴里的屁股），所以长度递减、烟屁股不动。 */
+      height: calc(var(--cig-len, 15%) - var(--burn, 0) * var(--cig-burn, 12%));
+      transform: translate(-50%, -100%) rotate(var(--cig-deg, 72deg));
       transform-origin: 50% 100%;
       background: linear-gradient(#f8f5ec 0 64%, #e6dfd1 64% 88%, #cdc5b5 88% 100%);
       border-radius: 1.5px;
       z-index: 6;
       box-shadow: 0 1px 2px rgba(0, 0, 0, .45);
-      transition: height .8s linear, opacity .18s ease;
+      transition: height .8s linear, opacity .18s ease, transform .22s ease;
     }
     body.smoking #cig { opacity: 1; }
+    /* 吸的那一下往嘴里缩一点 —— 烟不动的话就是一根白棍贴在脸上 */
+    body.ember #cig {
+      transform: translate(-50%, -100%) rotate(var(--cig-deg, 72deg)) translateY(7%);
+    }
 
     /* 燃点：平时微暗地"呼吸"，吸气那一下骤亮 —— 真实烟头的明暗就是这个节奏 */
     #cig::before {
@@ -224,11 +231,21 @@
     }
 
     /* 烟圈：只在"吐"的那一拍喷出来，先急后缓（原来匀速上升是假感主因） */
-    #smoke { left: 44%; top: 6%; width: 56%; height: 62%; z-index: 7; }
+    /* 烟柱起点跟着火头走（--cig-tip-* 由 JS 按当前燃烧长度算），
+       并且往外斜着飘 —— 原来是竖着从脸中间升上去，正好糊住右眼。 */
+    #smoke {
+      left: var(--cig-tip-x, 71%); top: var(--cig-tip-y, 58%);
+      width: 0; height: 0; z-index: 7;
+    }
     body.smoking #smoke { opacity: 1; }
     #smoke i {
-      position: absolute; bottom: 0; left: 30%;
-      width: 24%; aspect-ratio: 1 / 1; border-radius: 50%;
+      position: absolute; left: 0; top: 0;
+      /* 用 vw 而不是父元素百分比：父元素是个零尺寸的锚点，百分比算不出来。
+         vw 在这里就等于窗口宽度，换缩放也会跟着变。 */
+      width: 13vw; aspect-ratio: 1 / 1;
+      margin-left: -6.5vw; margin-top: -6.5vw;   /* 以锚点为中心；不用 translate 居中，
+                                                    否则会被关键帧里的 transform 顶掉 */
+      border-radius: 50%;
       /* 灰蓝调而不是纯白：浅色桌面上纯白等于看不见 */
       background: radial-gradient(circle at 40% 36%,
         rgba(255, 255, 255, .97) 0 22%,
@@ -241,11 +258,12 @@
     body.puffing #smoke i { animation: puffUp 2.3s cubic-bezier(.14, .7, .28, 1) forwards; }
     body.puffing #smoke i:nth-child(2) { animation-delay: .14s; }
     body.puffing #smoke i:nth-child(3) { animation-delay: .3s; }
+    /* 一口涌出 → 往右上方飘散，绕开眼睛那一带 */
     @keyframes puffUp {
-      0%   { transform: translate(0, 0) scale(.32);           opacity: 0; }
-      8%   { transform: translate(14%, -8%) scale(.85);        opacity: .58; }  /* 一口涌出 */
-      45%  { transform: translate(78%, -132%) scale(1.85);     opacity: .24; }
-      100% { transform: translate(152%, -260%) scale(2.6);     opacity: 0; }
+      0%   { transform: translate(0, 0) scale(.3);          opacity: 0; }
+      8%   { transform: translate(18%, -22%) scale(.8);     opacity: .5; }
+      45%  { transform: translate(110%, -80%) scale(1.5);   opacity: .2; }
+      100% { transform: translate(230%, -170%) scale(2.1);  opacity: 0; }
     }
 
     /* ---- 睡着：Z z z ---- */

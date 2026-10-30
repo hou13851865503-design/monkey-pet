@@ -137,6 +137,50 @@
     });
   })();
 
+  // ---- 抽烟的道具几何 ----
+  // 同样是坑过一次的东西：烟的位置和长度原来写死在 CSS 里（55.5% / 62.5% / 17% 长 / 26°），
+  // 结果火头正好落在眼球高度，看着像烟烧进了眼睛。根因是这只猴子嘴（62%）到眼睛下缘（53%）
+  // 之间只有 8% 的竖直空间，烟只要竖着往上叼就一定顶眼睛 —— 所以改成几乎横着斜出去。
+  // 现在几何全在 character.json 的 props.cig，并且顺手把烟柱起点也挂到火头上。
+  const CIG_FALLBACK = {
+    frame: 'e_sleepy', at: [0.545, 0.622], deg: 72,
+    len: 0.15, width: 0.028, burnSpan: 0.12,
+  };
+  const cig = Object.assign({}, CIG_FALLBACK, (profile.props && profile.props.cig) || {});
+  const num = (v, d) => (typeof v === 'number' && isFinite(v) ? v : d);
+  const cigDeg = num(cig.deg, 72);
+  const cigLen = num(cig.len, 0.15);
+  const cigAt = Array.isArray(cig.at) ? cig.at : CIG_FALLBACK.at;
+  const cigBurn = num(cig.burnSpan, 0.12);
+
+  (function applyCigStyle() {
+    const st = document.documentElement.style;
+    st.setProperty('--cig-x', (num(cigAt[0], 0.545) * 100).toFixed(2) + '%');
+    st.setProperty('--cig-y', (num(cigAt[1], 0.622) * 100).toFixed(2) + '%');
+    st.setProperty('--cig-w', (num(cig.width, 0.028) * 100).toFixed(2) + '%');
+    st.setProperty('--cig-len', (cigLen * 100).toFixed(2) + '%');
+    st.setProperty('--cig-burn', (cigBurn * 100).toFixed(2) + '%');
+    st.setProperty('--cig-deg', cigDeg.toFixed(2) + 'deg');
+  })();
+
+  // 火头位置 = 支点 + 当前长度沿倾角方向。烧短了火头会往嘴里退，烟柱得跟着退，
+  // 否则抽到后半段烟就从"空中"冒出来了。
+  // 注意 len 是按窗口高算的比例，横向位移要换算到窗宽：dx% = len * (H/W) * sin。
+  const winRatio = (profile.size && profile.size[1] && profile.size[0])
+    ? profile.size[1] / profile.size[0] : 1.16;
+  function applyCigTip(burn) {
+    const th = (cigDeg * Math.PI) / 180;
+    const left = Math.max(0, cigLen - Math.min(0.55, Math.max(0, burn || 0)) * cigBurn);
+    const ax = num(cigAt[0], 0.545);
+    const ay = num(cigAt[1], 0.622);
+    const x = ax + left * winRatio * Math.sin(th);
+    const y = ay - left * Math.cos(th);
+    const st = document.documentElement.style;
+    st.setProperty('--cig-tip-x', (x * 100).toFixed(2) + '%');
+    st.setProperty('--cig-tip-y', (y * 100).toFixed(2) + '%');
+  }
+  applyCigTip(0);
+
   // 把引擎算出的姿态贴到 #gait（铺满窗口，所以百分比位移 = 窗口比例，天然与尺寸无关）
   function applyPose(pose) {
     gaitEl.style.transform =
@@ -332,15 +376,18 @@
     clearInterval(burnTimer);
     burnCur = 0;
     setVar('--burn', 0);
+    applyCigTip(0);
     burnTimer = setInterval(() => {
       burnCur += 0.006;                      // 每秒约 2%
       if (burnCur > limit) { burnCur = limit; clearInterval(burnTimer); burnTimer = null; }
       setVar('--burn', burnCur.toFixed(3));
+      applyCigTip(burnCur);                  // 火头退到哪，烟柱就从哪冒
     }, 300);
   }
   function bumpBurn(n) {
     burnCur = Math.min(0.55, burnCur + n);
     setVar('--burn', burnCur.toFixed(3));
+    applyCigTip(burnCur);
   }
 
   // 抽烟：一口 = 吸 → 屏 → 仰头吐 → 发呆
@@ -348,8 +395,8 @@
     if (blue) document.body.classList.add('blue');
     smokeBurn(0.42);
     // 第 n 口：间隔越来越长（越抽越沉），吐烟也越来越慢
-    // 注意：全程只用一张脸 —— 道具（烟）是按这张脸的嘴角定位的，
-    // 中途换脸会让烟飘到鼻子上去。
+    // 全程只用一张脸：烟是按这张脸的嘴角（character.json 的 props.cig.at）定位的，
+    // 中途换脸烟就会飘走。要换脸必须同时重量那个 at。
     const puff = (t, hold) => {
       cue(t, () => { pulse('ember', 950); });     // 吸：烟头骤亮
       cue(t + 400, () => bumpBurn(0.045));        // 吸掉一截
@@ -412,8 +459,10 @@
       drinkBeats(drunk);
     } else if (kind === 'smoke') {
       const blue = force === 'blue' || (force !== 'revive' && Math.random() < 0.5);
-      // 全程都是同一张"抿着嘴发闷"的脸；满血复活的脸留到最后 3 秒才换
-      setAction('smoking', 30000, 'e_sad');
+      // 抽烟用"半眯眼 + 张着嘴"的那张脸。原来用的是 e_sad —— 那张是闭嘴下撇的，
+      // 烟叼在闭着的嘴上就说不通，用户直接反馈"没有张嘴的动作"。
+      // 嘴的张合和半眯的眼一起给出"抽着烟神游天外"的意思，比单纯忧郁更贴。
+      setAction('smoking', 30000, cig.frame || 'e_sleepy');
       smokeBeats(blue);
     }
   }

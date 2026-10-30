@@ -404,5 +404,54 @@ t('眩晕眼几何：尺寸跟窗口比例绑定，换窗口尺寸不用重算',
     '眼球实际长宽比 ' + aspectPx.toFixed(2) + ' 不像眼睛（w/h 可能填错了量纲）');
 });
 
+// ---------- 抽烟道具几何 ----------
+// 这条是为一个具体 bug 写的：烟原来 17% 长、26° 倾角，火头正好落在眼球高度
+// （47.2% vs 眼睛中心 47.5%），用户反馈"烟烧到眼睛里面"。
+// 根因是嘴（62%）到眼睛下缘（53%）之间只有 9% 的竖直空间，烟一长就必然顶上去。
+function cigTipOf(p) {
+  const c = (p.props && p.props.cig) || {};
+  const at = c.at || [0.5, 0.62];
+  const deg = ((c.deg === undefined ? 72 : c.deg) * Math.PI) / 180;
+  const len = c.len === undefined ? 0.15 : c.len;
+  // at 是窗口比例；len 按窗高算，横向要换到窗宽
+  const ratio = p.size[1] / p.size[0];
+  return {
+    x: at[0] + len * ratio * Math.sin(deg),
+    y: at[1] - len * Math.cos(deg),
+    len,
+    deg: (c.deg === undefined ? 72 : c.deg),
+    at,
+  };
+}
+
+t('叼烟：火头必须明显落在眼睛下缘以下（不然像烟烧进眼睛）', () => {
+  const tip = cigTipOf(profile);
+  const lowestEye = Math.max.apply(null, profile.eyes.points.map((p) => p.y + p.h / 2));
+  const gap = tip.y - lowestEye;
+  assert.ok(gap > 0.035,
+    '火头 y=' + tip.y.toFixed(3) + '，眼睛下缘 y=' + lowestEye.toFixed(3) +
+    '，只差 ' + (gap * 100).toFixed(1) + '% 窗高 —— 至少要留 3.5%，否则会像烟戳到眼睛');
+});
+
+t('叼烟：烟屁股在嘴里（落在嘴巴那一带），火头在脸的内侧', () => {
+  const tip = cigTipOf(profile);
+  assert.ok(tip.at[1] > 0.55 && tip.at[1] < 0.72,
+    '烟屁股纵向 ' + tip.at[1] + ' 不在嘴的高度上');
+  assert.ok(tip.at[0] > 0.35 && tip.at[0] < 0.75,
+    '烟屁股横向 ' + tip.at[0] + ' 不在脸的中间一带');
+  assert.ok(tip.x > tip.at[0], '烟必须往外侧叼（火头比屁股更靠外）');
+  assert.ok(tip.x < 1 && tip.y > 0, '火头跑出窗口了');
+});
+
+t('叼烟：抽烟用的那张脸必须是档案里声明过的情绪帧', () => {
+  const c = (profile.props && profile.props.cig) || {};
+  assert.ok(c.frame, 'props.cig.frame 没填，抽烟会退回默认脸');
+  const emo = profile.frames.emotions || {};
+  // cig.frame 存的是帧名（e_sleepy），不是情绪名（sleepy）
+  const frames = Object.keys(emo).map((k) => emo[k]);
+  assert.ok(frames.indexOf(c.frame) >= 0,
+    'props.cig.frame = "' + c.frame + '" 不是声明的情绪帧（可用：' + frames.join('/') + '）');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
