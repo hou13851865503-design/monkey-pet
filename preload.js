@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('pet', {
   // WorkBuddy API 自检 / 状态（设置页用）
   wbTest: (cfg) => ipcRenderer.invoke('wb-test', cfg),
   wbStatus: () => ipcRenderer.invoke('wb-status'),
+  wbAutowire: () => ipcRenderer.invoke('wb-autowire'),
   extractCard: (filePath) => ipcRenderer.send('extract-card', filePath),
   morningReport: () => ipcRenderer.send('morning-report'),
 

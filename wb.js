@@ -30,6 +30,14 @@ function isHttpUrl(u) {
   catch (_) { return false; }
 }
 
+// 由 chat 地址反推 /models 地址，用于"自动检测"时列出真实可用的模型
+function modelsUrlFor(base) {
+  const b = String(base || '').trim().replace(/\/+$/, '');
+  if (!b) return null;
+  const root = b.replace(/\/chat\/completions$/i, '');
+  return root + '/models';
+}
+
 // ---------- 错误分类 ----------
 // 分成"重试有意义"和"重试没意义"两类：401 重试三次只会让你等更久。
 const KIND = {
@@ -52,7 +60,7 @@ const RETRYABLE = new Set([KIND.RATE_LIMIT, KIND.SERVER, KIND.NETWORK, KIND.TIME
 function friendly(code, message) {
   const tail = message ? '（' + message + '）' : '';
   switch (code) {
-    case KIND.NO_CONFIG: return '还没配置 WorkBuddy API 地址 / 密钥，打开「AI 设置」填一下';
+    case KIND.NO_CONFIG: return '还没接上模型接口，打开「AI 设置」点「一键自动接好」';
     case KIND.BAD_URL: return '接口地址格式不对，应该像 https://xxx/v1' + tail;
     case KIND.AUTH: return '鉴权失败：API Key 不对或已过期' + tail;
     case KIND.MODEL: return '模型名不可用：检查「' + (DEFAULTS.model) + '」是否在该接口的可用列表里' + tail;
@@ -318,10 +326,85 @@ function createClient(opts) {
   // 改完设置要让熔断立刻放行，否则用户填对了 Key 还得等 45 秒
   function reset() { failStreak = 0; breakerUntil = 0; lastError = null; }
 
-  return { chat, ping, status, reset, endpointFor, DEFAULTS, KIND };
+  /**
+   * 列出某个接口真实可用的模型。自动检测靠它：与其让用户盲填模型名，不如把真名拿出来。
+   * 同样不抛异常。
+   */
+  async function listModels(o) {
+    const base = String((o && o.baseUrl) || '').trim();
+    const key = String((o && o.apiKey) || '').trim();
+    const url = modelsUrlFor(base);
+    if (!url || !isHttpUrl(url)) return { ok: false, code: KIND.BAD_URL, models: [], message: url || '' };
+    let res;
+    try {
+      res = await transport(url, {
+        method: 'GET',
+        headers: key ? { Authorization: 'Bearer ' + key, Accept: 'application/json' } : { Accept: 'application/json' },
+        timeoutMs: (o && o.timeoutMs) || 6000,
+      });
+    } catch (e) {
+      return { ok: false, code: kindForNetwork(e), models: [], message: String((e && e.message) || e) };
+    }
+    const text = String((res && res.body) || '');
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch (_) {}
+    const status = Number(res && res.status) || 0;
+    if (status < 200 || status >= 300) {
+      const msg = bodyMessage(json, text) || ('HTTP ' + status);
+      return { ok: false, code: kindForStatus(status, msg), models: [], message: msg, status };
+    }
+    const arr = json && (Array.isArray(json.data) ? json.data : Array.isArray(json.models) ? json.models : []);
+    const models = (arr || [])
+      .map((m) => (typeof m === 'string' ? m : m && (m.id || m.name || m.model)))
+      .filter((v) => typeof v === 'string' && v.trim())
+      .map((v) => v.trim());
+    return { ok: true, code: 'ok', models, message: '', status };
+  }
+
+  /**
+   * 依次试一批候选接口，返回能用的那些（带各自的模型清单）。
+   * candidates: [{ baseUrl, apiKey, from }]
+   */
+  async function discover(candidates) {
+    const list = Array.isArray(candidates) ? candidates.slice(0, 8) : [];
+    const out = [];
+    for (const c of list) {
+      if (!c || !c.baseUrl) continue;
+      const r = await listModels({ baseUrl: c.baseUrl, apiKey: c.apiKey, timeoutMs: 5000 });
+      out.push({
+        baseUrl: String(c.baseUrl).trim(),
+        from: c.from || '',
+        ok: r.ok,
+        models: r.models || [],
+        code: r.code,
+        message: r.message || '',
+      });
+      if (r.ok && r.models.length) break;   // 找到一个能用的就够了，不再打扰其它接口
+    }
+    return out;
+  }
+
+  return { chat, ping, status, reset, listModels, discover, endpointFor, DEFAULTS, KIND };
+}
+
+// 从模型清单里挑一个能用于对话的。
+// 顺序：显式指定的 → 任何 deepseek → 排除明显不是对话模型的（绘图 / 向量 / 语音 / 代码审查专用）→ 第一个
+const NON_CHAT = /image|embed|whisper|tts|speech|rerank|moderation|auto-review|codex-auto|dall|sora/i;
+function pickModel(models, prefer) {
+  const list = Array.isArray(models) ? models.filter(Boolean) : [];
+  if (!list.length) return '';
+  const wants = (Array.isArray(prefer) ? prefer : [prefer]).map((v) => String(v || '').trim()).filter(Boolean);
+  for (const w of wants) {
+    const exact = list.find((m) => m.toLowerCase() === w.toLowerCase());
+    if (exact) return exact;
+  }
+  const ds = list.find((m) => /deepseek/i.test(m));
+  if (ds) return ds;
+  const chat = list.filter((m) => !NON_CHAT.test(m));
+  return (chat.length ? chat : list)[0];
 }
 
 module.exports = {
-  createClient, endpointFor, isHttpUrl, kindForStatus, kindForNetwork,
-  bodyMessage, textFromJson, pickContent, friendly, DEFAULTS, KIND, RETRYABLE,
+  createClient, endpointFor, modelsUrlFor, isHttpUrl, kindForStatus, kindForNetwork,
+  bodyMessage, textFromJson, pickContent, pickModel, friendly, DEFAULTS, KIND, RETRYABLE,
 };

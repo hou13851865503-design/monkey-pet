@@ -115,12 +115,18 @@ npm run dist
 
 右键小猴 →「AI 设置」，接入 **WorkBuddy API**（OpenAI 兼容协议）：
 
+**最快的方式**：点「一键自动接好」。它会探测本机能用的接口（本机 Codex 中转 `127.0.0.1:8787`、Ollama、LM Studio 等），探到就自动填好、存盘，并立刻发一条测试请求确认能通。
+
+手动填的话：
+
 | 字段 | 说明 | 示例 |
 |---|---|---|
 | Base URL | 填到 `/v1` 为止，程序自己补 `/chat/completions` | `https://<你的接口地址>/v1` |
-| API Key | WorkBuddy 后台给的 Key | `sk-...` |
-| 模型 | 默认固定 `DeepSeek-V4.1-Flash`，点「改用其他模型」可解锁 | `DeepSeek-V4.1-Flash` |
+| API Key | 对应服务的 Key | `sk-...` |
+| 模型 | 优先 `DeepSeek-V4.1-Flash`；接口上没有就自动换成可用的并告诉你 | `DeepSeek-V4.1-Flash` |
 | 超时 / 重试 | 默认 25000ms / 2 次，只对限流、5xx、网络异常重试 | `25000` / `2` |
+
+> ⚠️ `DeepSeek-V4.1-Flash` 是 WorkBuddy 平台内的模型，没有对外的 API 可直连。想在桌宠里用它，需要拿到某个兼容 OpenAI 协议的服务商提供的 Key；否则自动接入会用本机已有的通道（如 GPT 系列）。
 
 - **没配也能用**：对话、名片识别提示去配置，PDF 论文解析自动降级成规则抽取，桌宠本身照常跑。
 - **点「测试连接」**会发一条极小请求，失败时直接显示错误码（`auth` / `model-not-found` / `network` / `timeout`…），不用猜。

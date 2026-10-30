@@ -1038,6 +1038,89 @@ function wbChat(opts) {
     hint: '内部错误', retryable: false,
   }));
 }
+
+// ---------- 一键自动接好 ----------
+// 现实情况：DeepSeek-V4.1-Flash 只跑在 WorkBuddy 自己的后端里，没有对外的 Key 可用。
+// 所以"手填地址+密钥"这条路对普通使用场景太重了 —— 干脆把本机能用的接口自动探一遍。
+const isLoopback = (u) => /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/)/i.test(String(u || ''));
+
+// 本机常见的中转/本地模型端口（连不上会立刻 ECONNREFUSED，不会卡住）
+const LOCAL_PROBES = [
+  'http://127.0.0.1:8787/v1',   // 本机 Codex 中转
+  'http://127.0.0.1:11434/v1',  // Ollama
+  'http://127.0.0.1:1234/v1',   // LM Studio
+  'http://127.0.0.1:8000/v1',   // vLLM / 各类自建
+];
+
+// 从本机已有工具里找令牌（只用于 loopback 地址，绝不外发）。
+// 顺手把 Codex 正在用的模型名记下来 —— 那是他机器上已经验证过能用的型号，比瞎猜靠谱。
+function localHints() {
+  const tokens = [];
+  const push = (v, from) => { if (v && tokens.every((x) => x.token !== v)) tokens.push({ token: v, from }); };
+  push(process.env.PET_WB_TOKEN, 'env');
+  let model = '';
+  try {
+    const cfg = fs.readFileSync(path.join(os.homedir(), '.codex', 'config.toml'), 'utf8');
+    const m = /experimental_bearer_token\s*=\s*"([^"]+)"/.exec(cfg);
+    if (m) push(m[1], 'codex');
+    const mm = /^\s*model\s*=\s*"([^"]+)"/m.exec(cfg);
+    if (mm) model = mm[1];
+  } catch (_) {}
+  try {
+    const a = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.codex', 'auth.json'), 'utf8'));
+    if (a && a.OPENAI_API_KEY) push(String(a.OPENAI_API_KEY), 'codex-auth');
+  } catch (_) {}
+  return { tokens, model };
+}
+
+// 挑模型：优先用户的 DeepSeek-V4.1-Flash，其次本机已验证可用的型号，其次任何 deepseek（实现在 wb.js，好单测）
+const pickModel = wb.pickModel;
+
+async function autowire() {
+  const saved = settings.ai || {};
+  const { tokens, model: codexModel } = localHints();
+  const cands = [];
+  // 1) 已经填过的地址优先，尊重用户的选择
+  if (saved.baseUrl) cands.push({ baseUrl: saved.baseUrl, apiKey: saved.apiKey || '', from: 'saved' });
+  // 2) 本机端口 × 本机令牌（只给 loopback 带令牌）
+  for (const base of LOCAL_PROBES) {
+    for (const t of tokens) cands.push({ baseUrl: base, apiKey: t.token, from: t.from });
+    cands.push({ baseUrl: base, apiKey: '', from: 'none' });   // 本地模型通常不校验 Key
+  }
+
+  const tried = await wbClient.discover(cands);
+  const hit = tried.find((t) => t.ok && t.models.length);
+  if (!hit) return { ok: false, tried, reason: 'no-endpoint' };
+
+  const model = pickModel(hit.models, [saved.model, wb.DEFAULTS.model, codexModel]);
+  const keepModel = String(saved.model || '') === model;
+  const src = cands.find((c) => c.baseUrl === hit.baseUrl && c.from === hit.from);
+  settings.ai = {
+    baseUrl: hit.baseUrl,
+    apiKey: (src && src.apiKey) || '',
+    model,
+    timeoutMs: Number(saved.timeoutMs) || wb.DEFAULTS.timeoutMs,
+    maxRetries: Number.isFinite(Number(saved.maxRetries)) ? Number(saved.maxRetries) : wb.DEFAULTS.maxRetries,
+  };
+  wbClient.reset();
+  saveSettings();
+  refreshTray();
+
+  const ping = await wbClient.ping();
+  return {
+    ok: ping.ok === true,
+    baseUrl: hit.baseUrl,
+    model,
+    models: hit.models,
+    from: hit.from,
+    // 模型被换掉了要明确告诉用户，别悄悄改
+    modelChanged: !keepModel,
+    wantModel: wb.DEFAULTS.model,
+    hasWantModel: hit.models.includes(wb.DEFAULTS.model),
+    ping,
+    tried,
+  };
+}
 async function llmChat(messages) {
   const r = await wbChat({ messages, temperature: 0.7, maxTokens: 512 });
   if (!r.ok) return { ok: false, error: r.hint || r.message, code: r.code, detail: r.message };
@@ -1325,7 +1408,8 @@ function saveAiSettings(cfg) {
   const ai = cfg.ai || {};
   settings.ai = {
     baseUrl: String(ai.baseUrl || '').trim(),
-    apiKey: String(ai.apiKey || '').trim(),
+    // 自动接入后界面上不回显密钥，这时传的是 undefined —— 保留原来的，别把人家的 Key 洗掉
+    apiKey: ai.apiKey === undefined ? String((settings.ai && settings.ai.apiKey) || '') : String(ai.apiKey || '').trim(),
     model: String(ai.model || wb.DEFAULTS.model).trim() || wb.DEFAULTS.model,
     timeoutMs: Math.max(5000, Math.min(Number(ai.timeoutMs) || wb.DEFAULTS.timeoutMs, 180000)),
     maxRetries: Math.max(0, Math.min(Number(ai.maxRetries) || 0, 4)),
@@ -1659,7 +1743,8 @@ function registerIpc() {
       const keep = settings.ai;
       settings.ai = Object.assign({}, keep, {
         baseUrl: String(cfg.ai.baseUrl || '').trim(),
-        apiKey: String(cfg.ai.apiKey || '').trim(),
+        // 界面不回显密钥时传的是 undefined，沿用已保存的
+        apiKey: cfg.ai.apiKey === undefined ? String((keep && keep.apiKey) || '') : String(cfg.ai.apiKey || '').trim(),
         model: String(cfg.ai.model || wb.DEFAULTS.model).trim(),
       });
       wbClient.reset();
@@ -1668,6 +1753,11 @@ function registerIpc() {
     return wbClient.ping();
   });
   ipcMain.handle('wb-status', () => wbClient.status());
+  // 一键自动接好：探本机可用接口 → 存配置 → 立刻 ping 一次
+  ipcMain.handle('wb-autowire', async () => {
+    try { return await autowire(); }
+    catch (e) { return { ok: false, reason: 'error', message: String((e && e.message) || e), tried: [] }; }
+  });
   ipcMain.on('open-ai-settings', () => openAiSettings());
   ipcMain.on('open-chat', () => openChat());
   ipcMain.on('open-paper', () => openPaperTool());
@@ -2038,6 +2128,57 @@ if (!gotTheLock) {
         } catch (e) { console.log('[paper-ui] err ' + e.message); }
         app.exit(0);
       }, 3400);
+    }
+    if (process.env.PET_TEST_CHAT) {
+      // 真在聊天窗口里发一句话，截到回复就立刻截图 —— 用真实配置，不打桩
+      const out = process.env.PET_TEST_CHAT;
+      setTimeout(() => openChat(), 800);
+      setTimeout(async () => {
+        const alive = () => chatWin && !chatWin.isDestroyed();
+        try {
+          await chatWin.webContents.executeJavaScript(
+            "document.getElementById('inp').value='你好，用一句话介绍你自己'; send(); 'sent'"
+          );
+        } catch (e) { console.log('[chat] send err ' + e.message); }
+        // 轮询等回复（第二个 .bot 且不是省略号），一出来就截图，别等窗口被环境回收
+        const deadline = Date.now() + 20000;
+        let log = '';
+        while (Date.now() < deadline && alive()) {
+          log = await chatWin.webContents.executeJavaScript(
+            "Array.from(document.querySelectorAll('.msg')).map(function(d){return d.className+': '+d.textContent;}).join('\\n')"
+          ).catch(() => '');
+          if (/\bbot: (?!…)/.test(log)) break;
+          await new Promise((r) => setTimeout(r, 300));
+        }
+        console.log('[chat] log\n' + log);
+        if (!alive()) { console.log('[chat] window gone'); return app.exit(1); }
+        try {
+          chatWin.show(); chatWin.moveTop();
+          await new Promise((r) => setTimeout(r, 300));
+          const buf = (await chatWin.webContents.capturePage()).toPNG();
+          if (buf.length) fs.writeFileSync(out, buf);
+          console.log('[chat] shot ' + buf.length);
+        } catch (e) { console.log('[chat] shot err ' + e.message); }
+        app.exit(0);
+      }, 2000);
+    }
+    if (process.env.PET_TEST_AUTOWIRE) {
+      // 真跑一次自动接入（会真的探本机端口），结果写文件；密钥不回显
+      const out = process.env.PET_TEST_AUTOWIRE;
+      setTimeout(async () => {
+        let res;
+        try {
+          res = await autowire();
+        } catch (e) {
+          res = { ok: false, reason: 'error', message: String((e && e.message) || e) };
+        }
+        const safe = JSON.parse(JSON.stringify(res || {}));
+        safe.keySaved = !!(settings.ai && settings.ai.apiKey);
+        delete safe.tried;
+        safe.tried = ((res && res.tried) || []).map((t) => ({ baseUrl: t.baseUrl, ok: t.ok, code: t.code, n: (t.models || []).length }));
+        try { fs.writeFileSync(out, JSON.stringify(safe, null, 1)); } catch (_) {}
+        app.exit(0);
+      }, 1200);
     }
     if (process.env.PET_TEST_WB_UI) {
       // 只截「AI 设置」这一屏，用来确认接入改了之后界面没塌

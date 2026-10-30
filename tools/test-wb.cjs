@@ -192,6 +192,51 @@ const okReply = (text) => (req, res) => jsonReply(res, 200, {
   ok('max_tokens 透传', seen && seen.body.max_tokens === 32);
   ok('jsonMode 转成 response_format', seen && seen.body.response_format && seen.body.response_format.type === 'json_object');
 
+  console.log('\n[自动检测：列模型 / 挑模型]');
+  ok('/models 地址由 chat 地址反推',
+    wb.modelsUrlFor('http://127.0.0.1:8787/v1/chat/completions') === 'http://127.0.0.1:8787/v1/models',
+    wb.modelsUrlFor('http://127.0.0.1:8787/v1/chat/completions'));
+
+  plan('/m/v1/models', (req, res) => jsonReply(res, 200, {
+    data: [{ id: 'gpt-5.6-terra' }, { id: 'other-model' }, { id: 'DeepSeek-V4.1-Flash' }],
+  }));
+  const cM = mk(Object.assign({}, CFG, { baseUrl: base + '/m/v1' }));
+  const lm = await cM.listModels({ baseUrl: base + '/m/v1', apiKey: 'k' });
+  ok('listModels 拿到 3 个模型', lm.ok && lm.models.length === 3, lm.models);
+  ok('优先挑用户指定的模型',
+    wb.pickModel(lm.models, 'DeepSeek-V4.1-Flash') === 'DeepSeek-V4.1-Flash');
+  ok('没有指定模型时优先 deepseek',
+    wb.pickModel(lm.models, 'gpt-5.6-terra') === 'gpt-5.6-terra');   // 指定了就用指定的
+  ok('指定模型不在列表里就退回第一个',
+    wb.pickModel(['gpt-5.6-terra', 'other-model'], 'DeepSeek-V4.1-Flash') === 'gpt-5.6-terra');
+  ok('有 deepseek 前缀的会被优先选',
+    wb.pickModel(['gpt-5.6-terra', 'deepseek-chat'], '') === 'deepseek-chat');
+  ok('空列表返回空串', wb.pickModel([], 'x') === '');
+  ok('跳过绘图/审查专用模型，选能聊天的',
+    wb.pickModel(['codex-auto-review', 'gpt-image-2.5', 'gpt-5.6-terra'], '') === 'gpt-5.6-terra',
+    wb.pickModel(['codex-auto-review', 'gpt-image-2.5', 'gpt-5.6-terra'], ''));
+  ok('全是专用模型时也总能返回一个', wb.pickModel(['gpt-image-2.5'], '') === 'gpt-image-2.5');
+  ok('支持优先级列表：本机已验证的型号排第二',
+    wb.pickModel(['gpt-5.6-luna', 'gpt-5.6-terra'], ['DeepSeek-V4.1-Flash', 'gpt-5.6-terra']) === 'gpt-5.6-terra');
+
+  plan('/m401/v1/models', (req, res) => jsonReply(res, 401, { error: { message: 'bad token' } }));
+  const lm401 = await cM.listModels({ baseUrl: base + '/m401/v1', apiKey: 'bad' });
+  ok('401 时 listModels 回 auth 而不是抛', lm401.ok === false && lm401.code === wb.KIND.AUTH, lm401.code);
+
+  const dead = await cM.discover([{ baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'k', from: 'x' }]);
+  ok('连不上时 discover 也不抛', Array.isArray(dead) && dead[0].ok === false, dead && dead[0] && dead[0].code);
+
+  // discover 命中第一个可用就停，不再往下探
+  plan('/d1/v1/models', (req, res) => jsonReply(res, 200, { data: [{ id: 'm-one' }] }));
+  const found = await cM.discover([
+    { baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'k', from: 'dead' },
+    { baseUrl: base + '/d1/v1', apiKey: 'k', from: 'ok' },
+    { baseUrl: base + '/m/v1', apiKey: 'k', from: 'later' },
+  ]);
+  ok('跳过连不上的，命中可用的', found.length === 2 && found[1].ok === true, found.map((f) => f.ok));
+  ok('命中后不再继续探测', found.length === 2, found.length);
+  ok('返回了来源标记', found[1].from === 'ok', found[1].from);
+
   server.close();
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
