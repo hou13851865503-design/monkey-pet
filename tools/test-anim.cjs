@@ -365,5 +365,44 @@ t('换形象后动作表可为空也不崩（降级为纯待机）', () => {
   assert.strictEqual(a.pose.frame, 'front');
 });
 
+// ---------- 眩晕眼几何 ----------
+// 踩过的坑：眩晕时那两个卡通眼球的位置写死在 CSS 里，偏了 2% 就露出半个原瞳孔，
+// 看着像多长了一只眼。现在几何来自档案，所以这里守住"档案本身是合法的"。
+t('眩晕眼几何：档案里必须有两只眼、且都落在脸的上半部', () => {
+  const e = profile.eyes;
+  assert.ok(e, 'character.json 缺 eyes 段，眩晕时会退化成只摇晃、不盖眼球');
+  assert.ok(Array.isArray(e.points), 'eyes.points 必须是数组');
+  assert.strictEqual(e.points.length, 2, '必须正好两只眼，多了少了都会看着诡异');
+  e.points.forEach((p, i) => {
+    ['x', 'y', 'w', 'h'].forEach((k) => {
+      assert.ok(typeof p[k] === 'number' && p[k] > 0 && p[k] < 1,
+        'eyes.points[' + i + '].' + k + ' 必须在 0~1 之间（比例，不是像素）');
+    });
+    // 落在脸的左半边 / 右半边，别两只挤在一起
+    assert.ok(i === 0 ? p.x < 0.5 : p.x > 0.5, 'eyes.points[' + i + '] 左右眼位置反了');
+    assert.ok(p.y > 0.35 && p.y < 0.60, 'eyes.points[' + i + '] 纵向不在眼睛那一带');
+  });
+  // 椭圆要盖得住虹膜（约 9% 宽）又不至于糊住半张脸
+  e.points.forEach((p, i) => {
+    assert.ok(p.w > 0.10 && p.w < 0.20, 'eyes.points[' + i + '] 宽 ' + p.w + ' 超出合理范围（会露瞳孔或糊脸）');
+    assert.ok(p.h > 0.07 && p.h < 0.16, 'eyes.points[' + i + '] 高 ' + p.h + ' 超出合理范围');
+  });
+});
+
+t('眩晕眼几何：两只眼睛等高（素材里眼睛在同一条水平线上）', () => {
+  const [a, b] = profile.eyes.points;
+  assert.ok(Math.abs(a.y - b.y) < 0.02,
+    '左右眼纵向差 ' + Math.abs(a.y - b.y).toFixed(4) + '，超过 2% 就一眼高一眼低');
+});
+
+t('眩晕眼几何：尺寸跟窗口比例绑定，换窗口尺寸不用重算', () => {
+  const [a] = profile.eyes.points;
+  // w 是按窗口宽算的比例，h 是按高算的比例。存档时如果误填了像素值，
+  // 换到 4K 屏上就会缩成一个点 —— 这里用"眼裂本来就略宽于高"做合理性检查。
+  const aspectPx = (a.w * profile.size[0]) / (a.h * profile.size[1]);
+  assert.ok(aspectPx > 0.9 && aspectPx < 1.6,
+    '眼球实际长宽比 ' + aspectPx.toFixed(2) + ' 不像眼睛（w/h 可能填错了量纲）');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

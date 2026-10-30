@@ -2297,6 +2297,27 @@ if (!gotTheLock) {
         app.exit(0);
       }, 2100);
     }
+    // 几何核对：把关键盒子的实际尺寸/位置打出来，别再靠截图猜
+    if (process.env.PET_TEST_RECT) {
+      setTimeout(async () => {
+        try {
+          const r = await win.webContents.executeJavaScript(`(() => {
+            const pick = (el) => { if (!el) return null; const b = el.getBoundingClientRect();
+              return { x:+b.x.toFixed(1), y:+b.y.toFixed(1), w:+b.width.toFixed(1), h:+b.height.toFixed(1) }; };
+            const eyes = [...document.querySelectorAll('.eye')].map(pick);
+            const act = document.querySelector('img.f.active');
+            return { win: { w: innerWidth, h: innerHeight }, dpr: devicePixelRatio,
+              stage: pick(document.getElementById('stage')),
+              breath: pick(document.getElementById('breath')),
+              eyesBox: pick(document.getElementById('eyes')),
+              act: pick(act), actNatural: act ? [act.naturalWidth, act.naturalHeight] : null,
+              eyes };
+          })()`);
+          console.log('[rect] ' + JSON.stringify(r));
+        } catch (e) { console.log('[rect] err ' + e.message); }
+        app.exit(0);
+      }, 2000);
+    }
     if (process.env.PET_TEST_MENU) {
       setTimeout(() => openEmotionPicker(), 1800);
       setTimeout(async () => {

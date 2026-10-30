@@ -46,14 +46,6 @@
     }
     return d;
   }
-  (function buildDizzyEyes() {
-    const els = document.querySelectorAll('.eye');
-    if (!els.length) return;
-    const d = spiralPath(12, 12, 1, 8.4, 2.6, 120);
-    const svg = '<svg viewBox="0 0 24 24"><path d="' + d +
-      '" fill="none" stroke="#2f2116" stroke-width="1.6" stroke-linecap="round"/></svg>';
-    els.forEach((el) => { el.innerHTML = svg; });
-  })();
   ['angry', 'cheer', 'love', 'sad', 'shy', 'sleepy', 'surprised', 'thinking', 'wink']
     .forEach((n) => addFrame('e_' + n, `./assets/emotion_${n}.png`));
 
@@ -94,6 +86,13 @@
       { id: 'head', box: [0.24, 0.03, 0.80, 0.46], reaction: 'headTap' },
       { id: 'body', box: [0.14, 0.46, 0.94, 1.00], reaction: 'bodyTap' },
     ],
+    eyes: {
+      ink: '#2f2116',
+      points: [
+        { x: 0.47526, y: 0.47657, w: 0.14344, h: 0.10621 },
+        { x: 0.66276, y: 0.47657, w: 0.14344, h: 0.10621 },
+      ],
+    },
     clips: [],
   };
   let profile = FALLBACK_PROFILE;
@@ -111,6 +110,32 @@
       document.documentElement.style.setProperty('--foot', String(profile.anchors.foot * 100) + '%');
     }
   } catch (_) {}
+
+  // ---- 眩晕眼：盖住原瞳孔的卡通眼球 + 旋转螺旋 ----
+  // 几何全部来自档案（character.json 的 eyes），不是写死的像素。
+  // 这是之前踩过的坑：位置写死在 CSS 里，素材一换（甚至只是量错 2%）就会露出半个
+  // 原瞳孔，看着像多长了一只眼。所以现在按档案生成，档案没给就干脆不画。
+  (function buildDizzyEyes() {
+    const host = document.getElementById('eyes');
+    if (!host) return;
+    host.innerHTML = '';
+    const def = profile.eyes;
+    const pts = def && Array.isArray(def.points) ? def.points : [];
+    if (!pts.length) return;   // 没量过眼球位置：只靠头顶转圈 + 身体摇晃，不硬画
+    const ink = def.ink || '#2f2116';
+    const d = spiralPath(12, 12, 1, 8.4, 2.6, 120);
+    pts.forEach((pt) => {
+      const el = document.createElement('i');
+      el.className = 'eye';
+      el.style.left = (pt.x * 100).toFixed(3) + '%';
+      el.style.top = (pt.y * 100).toFixed(3) + '%';
+      el.style.width = (pt.w * 100).toFixed(3) + '%';
+      el.style.height = (pt.h * 100).toFixed(3) + '%';
+      el.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + d +
+        '" fill="none" stroke="' + ink + '" stroke-width="1.6" stroke-linecap="round"/></svg>';
+      host.appendChild(el);
+    });
+  })();
 
   // 把引擎算出的姿态贴到 #gait（铺满窗口，所以百分比位移 = 窗口比例，天然与尺寸无关）
   function applyPose(pose) {
@@ -232,7 +257,7 @@
     document.body.classList.add('dizzy');
     document.body.classList.remove('faceLeft');   // 眩晕用正面帧，别镜像
     clearTimeout(emotionTimer);
-    show('d0');                    // 正面睁眼帧，和眼白/螺旋的位置对齐
+    show((profile.frames && profile.frames.front) || 'd0');   // 正面睁眼帧，和眼白/螺旋的位置对齐
     anim.cancel();                 // 晕的时候别让动作姿态继续扭
     anim.lock(ms + 150, 'dizzy');
     clearTimeout(dizzyTimer);
