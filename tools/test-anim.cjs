@@ -453,5 +453,182 @@ t('叼烟：抽烟用的那张脸必须是档案里声明过的情绪帧', () =>
     'props.cig.frame = "' + c.frame + '" 不是声明的情绪帧（可用：' + frames.join('/') + '）');
 });
 
+// ---------- 动作的可辨识度 ----------
+// 这一节是为用户反馈"每个动作看起来都只是整只猴子晃了一下"写的。
+//
+// 单张位图没有关节，能用来区分动作的手法只有三种：
+//   ① 切帧（front / side / turnA / 9 张情绪脸，其中 e_cheer 双臂上举、e_shy 手掩嘴）
+//   ② 整只的位移旋转缩放
+//   ③ 单独那一层头的旋转/位移/缩放
+// 每个动作至少要在其中一项上有**人眼看得见**的幅度，否则它在别人眼里等于不存在。
+// 写成断言，是为了以后调参数时不会又把某个动作调没了。
+const VISIBLE = {
+  dx: 0.006, dy: 0.006, rot: 1.0, sx: 0.008, sy: 0.008,
+  headRot: 1.5, headDx: 0.006, headDy: 0.005, headSx: 0.008, headSy: 0.010,
+};
+// 一条曲线的"典型幅度"，用来把不同量纲的通道折成同一个尺度再比距离
+const SCALE = {
+  dx: 0.02, dy: 0.02, rot: 4, sx: 0.04, sy: 0.04,
+  headRot: 6, headDx: 0.015, headDy: 0.008, headSx: 0.04, headSy: 0.05,
+};
+
+function amplitudeOf(def) {
+  const amp = {};
+  Object.keys(VISIBLE).forEach((k) => { amp[k] = 0; });
+  const lo = {}, hi = {};
+  Object.keys(VISIBLE).forEach((k) => { lo[k] = Infinity; hi[k] = -Infinity; });
+  const N = 60;
+  for (let i = 0; i < N; i++) {
+    const s = PetAnim.sampleKeys(def.keys, i / (N - 1));
+    Object.keys(VISIBLE).forEach((k) => {
+      lo[k] = Math.min(lo[k], s[k]);
+      hi[k] = Math.max(hi[k], s[k]);
+    });
+  }
+  Object.keys(VISIBLE).forEach((k) => { amp[k] = hi[k] - lo[k]; });
+  return amp;
+}
+
+// 把幅度折成"够不够看得见"的倍数（1.0 = 刚好到人眼门槛）
+function visibility(amp) {
+  const v = {};
+  Object.keys(VISIBLE).forEach((k) => { v[k] = amp[k] / VISIBLE[k]; });
+  return v;
+}
+
+function curveOf(def) {
+  const out = [];
+  const N = 40;
+  for (let i = 0; i < N; i++) {
+    const s = PetAnim.sampleKeys(def.keys, i / (N - 1));
+    out.push({
+      v: Object.keys(SCALE).map((k) => (s[k] - PetAnim.NEUTRAL[k]) / SCALE[k]),
+      frame: PetAnim.normalize(profile).resolveFrame(s.frame || 'front'),
+    });
+  }
+  return out;
+}
+
+t('每个动作都至少有一项"人眼看得见"的幅度', () => {
+  const bad = [];
+  profile.clips.forEach((c) => {
+    const v = visibility(amplitudeOf(c));
+    const best = Object.keys(v).reduce((a, k) => (v[k] > v[a] ? k : a), Object.keys(v)[0]);
+    if (v[best] < 1) bad.push(c.id + '（最大 ' + best + ' 只有门槛的 ' + v[best].toFixed(2) + ' 倍）');
+  });
+  assert.strictEqual(bad.length, 0, '这些动作小到看不出来：\n       ' + bad.join('\n       '));
+});
+
+t('每个动作至少叠两种手法（只靠一项，很容易跟别的动作撞脸）', () => {
+  const bad = [];
+  profile.clips.forEach((c) => {
+    const v = visibility(amplitudeOf(c));
+    const n = Object.keys(v).filter((k) => v[k] >= 1).length;
+    if (n < 2) bad.push(c.id + ' 只有 ' + n + ' 项');
+  });
+  assert.strictEqual(bad.length, 0, '手法太单薄：' + bad.join('、'));
+});
+
+t('动作表里既有"只动头"的动作，也有"完全不碰头"的动作', () => {
+  const HEAD = PetAnim.HEAD_CHANNELS;
+  const BODY = PetAnim.BODY_CHANNELS;
+  let headDominant = '', noHead = '';
+  profile.clips.forEach((c) => {
+    const v = visibility(amplitudeOf(c));
+    const hasHead = HEAD.some((k) => c.keys.some((kk) => kk[k] !== undefined));
+    if (!hasHead) { noHead = noHead || c.id; return; }
+    const maxHead = Math.max.apply(null, HEAD.map((k) => v[k]));
+    const maxBody = Math.max.apply(null, BODY.map((k) => v[k]));
+    if (maxHead > maxBody * 2) headDominant = headDominant || c.id;
+  });
+  assert.ok(noHead, '一个"不碰头"的动作都没有 —— 头层一旦初始化失败就全表不能播了');
+  assert.ok(headDominant,
+    '没有一个是"头主导"的动作 —— 说明头层白做了，点头/摇头/歪头还是整只在晃');
+});
+
+t('任意两个动作都不能几乎一样（曲线距离 >= 0.25，或者切帧明显不同）', () => {
+  const bad = [];
+  const curves = profile.clips.map((c) => ({ id: c.id, cur: curveOf(c) }));
+  for (let i = 0; i < curves.length; i++) {
+    for (let j = i + 1; j < curves.length; j++) {
+      const A = curves[i], B = curves[j];
+      let sum = 0;
+      for (let n = 0; n < A.cur.length; n++) {
+        const a = A.cur[n].v, b = B.cur[n].v;
+        let q = 0;
+        for (let k = 0; k < a.length; k++) q += (a[k] - b[k]) * (a[k] - b[k]);
+        sum += Math.sqrt(q / a.length);
+      }
+      const dist = sum / A.cur.length;
+      // 切帧不同（比如一个用双臂上举的 cheer、一个用正脸）时，曲线像也没关系 ——
+      // 人眼看到的脸和姿势本来就不一样。
+      const frameSame = A.cur.every((p, n) => p.frame === B.cur[n].frame);
+      if (dist < 0.25 && frameSame) {
+        bad.push(A.id + ' ~ ' + B.id + '（距离 ' + dist.toFixed(3) + '，切帧也一样）');
+      }
+    }
+  }
+  assert.strictEqual(bad.length, 0, '这些动作互相分不出来：\n       ' + bad.join('\n       '));
+});
+
+t('每个动作都真的能播起来，播完自动回到 idle', () => {
+  const bad = [];
+  profile.clips.forEach((c) => {
+    const a = PetAnim.create(profile);
+    if (!a.play(c.id, { force: true })) { bad.push(c.id + ' 播不起来'); return; }
+    if (a.clipId !== c.id) { bad.push(c.id + ' 播了别的动作（' + a.clipId + '）'); return; }
+    run(a, c.dur + 120);
+    if (a.clipId) bad.push(c.id + ' 播完没结束（还卡在 ' + a.clipId + '）');
+    if (a.state !== 'idle') bad.push(c.id + ' 播完状态是 ' + a.state);
+  });
+  assert.strictEqual(bad.length, 0, bad.join('；'));
+});
+
+t('玩动作的整个过程中，帧始终是档案里声明过的帧', () => {
+  const p = PetAnim.normalize(profile);
+  const known = {};
+  Object.keys(imgsOf(profile)).forEach((k) => { known[k] = 1; });
+  const bad = [];
+  profile.clips.forEach((c) => {
+    for (let i = 0; i <= 40; i++) {
+      const f = p.resolveFrame(PetAnim.sampleKeys(c.keys, i / 40).frame || 'front');
+      if (!known[f]) bad.push(c.id + ' -> ' + f);
+    }
+  });
+  assert.strictEqual(bad.length, 0, '这些帧在档案里根本不存在：' + bad.join('、'));
+});
+
+function imgsOf(p) {
+  const out = {};
+  Object.keys(p.frames || {}).forEach((k) => {
+    if (typeof p.frames[k] === 'string') out[p.frames[k]] = 1;
+  });
+  const emo = (p.frames && p.frames.emotions) || {};
+  Object.keys(emo).forEach((k) => { out[emo[k]] = 1; });
+  return out;
+}
+
+// ---------- 头层几何 ----------
+// 头层靠一条横向蒙版把脖子以上切下来，切在眼睛上就会把眼睛切成两半。
+t('头层切线必须落在眼睛下方、且不下探到胸口', () => {
+  const g = PetAnim.normalize(profile).headGeom;
+  const lowestEye = Math.max.apply(null, (profile.eyes.points || []).map((p) => p.y + p.h / 2));
+  assert.ok(g.cut > lowestEye + 0.05,
+    '切线 ' + g.cut.toFixed(3) + ' 离眼睛下缘 ' + lowestEye.toFixed(3) + ' 太近，会把眼睛切掉半只');
+  assert.ok(g.cut < 0.80, '切线 ' + g.cut.toFixed(3) + ' 太低了，把大半个身子也算成头，转起来像整只在动');
+});
+
+t('头层支点必须在切线下方（否则一缩放，切线上就会露缝）', () => {
+  const g = PetAnim.normalize(profile).headGeom;
+  assert.ok(g.pivot[1] >= g.cut,
+    '支点 y=' + g.pivot[1] + ' 在切线 ' + g.cut + ' 上面，头一缩就会在脖子上拉出一条缝');
+});
+
+t('头层支点横向要落在脖子的中线附近（不然头会绕着耳朵转）', () => {
+  const g = PetAnim.normalize(profile).headGeom;
+  assert.ok(g.pivot[0] > 0.4 && g.pivot[0] < 0.7,
+    '支点 x=' + g.pivot[0] + ' 偏离中线太多');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

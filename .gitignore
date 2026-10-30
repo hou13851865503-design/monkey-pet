@@ -16,3 +16,6 @@ desktop.ini
 # 本地快捷方式 / 临时文件
 *.lnk
 _scratch/
+
+# 动作采样截图（tools/sheet.py 的输出，只是排查用）
+_shots/

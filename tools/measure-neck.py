@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""量出正面帧里"脖子"的位置，生成 character.json 的 headCut / headPivot。
+
+为什么需要这一步：桌宠的素材是单张位图，没有骨骼关节。整只一起平移旋转的时候，
+「点头」「摇头」「歪头」在别人眼里全是同一个动作 —— 整只晃了一下。唯一能让人分
+得出来的办法，是把头从脖子处单独切一层出来，让它能自己转、自己缩。
+
+切在哪儿？**脖子是轮廓最窄的那一行**。这个方法很朴素但是准：头顶最窄的地方是
+耳朵之间（错），胸口最窄的地方是腰（错），而下巴和肩膀之间一定有一个收窄的
+"腰"。在合理的纵向范围里找宽度最小的一行就是了。
+
+用法：
+    python tools/measure-neck.py assets/01.png
+    python tools/measure-neck.py assets/01.png --preview neck.png
+    python tools/measure-neck.py assets/01.png --out character.json
+
+输出（窗口比例，直接抄进 character.json）：
+    headCut   = 该行的纵向比例
+    headPivot = [该行最窄处的横向中心, 该行再往下一小段]
+                支点放在切线**下方**：这样"头缩一下"是朝脖子压，切线上不会有缝。
+
+依赖：Pillow（pip install pillow）
+"""
+import argparse
+import json
+import sys
+
+try:
+    from PIL import Image
+except ImportError:
+    sys.exit('需要 Pillow：pip install pillow')
+
+# 只在"下巴到胸口"这段里找脖子。范围取宽一点没关系，宽度最小本身就排除了
+# 头顶（耳朵之间不窄）和脚（脚更窄但被下界挡住）。
+SEARCH_TOP = 0.45
+SEARCH_BOTTOM = 0.85
+
+# 支点比切线再往下多少（窗高比例）。0.05 大约是一个下巴的厚度：
+# 缩放到 0.91 时，切线上只移动 0.05 * 0.09 = 0.45% 窗高（约 1 个像素）。
+PIVOT_DROP = 0.055
+
+# 抗锯齿边缘：alpha 低于这个值不算实体，不然毛发会虚出一圈把宽度算大
+ALPHA_ON = 128
+
+
+def row_extent(alpha, w, y):
+    xs = [x for x in range(w) if alpha[x, y] > ALPHA_ON]
+    if not xs:
+        return None
+    return min(xs), max(xs)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('image')
+    ap.add_argument('--preview', help='把切线画在图上另存一份')
+    ap.add_argument('--out', help='直接写回 character.json')
+    args = ap.parse_args()
+
+    im = Image.open(args.image).convert('RGBA')
+    w, h = im.size
+    alpha = im.getchannel('A').load()
+
+    rows = []
+    for y in range(h):
+        e = row_extent(alpha, w, y)
+        if e:
+            rows.append((y, e[0], e[1]))
+    if not rows:
+        sys.exit('这张图是全透明的？')
+
+    y0 = int(h * SEARCH_TOP)
+    y1 = int(h * SEARCH_BOTTOM)
+    band = [r for r in rows if y0 <= r[0] <= y1]
+    if not band:
+        sys.exit('在 %.0f%%~%.0f%% 这段里找不到轮廓' % (SEARCH_TOP * 100, SEARCH_BOTTOM * 100))
+
+    # 宽度最小的一行 = 脖子。取连续几行的中点，避免正好卡在一根毛上。
+    width = lambda r: r[2] - r[1]
+    best_w = min(width(r) for r in band)
+    picked = [r for r in band if width(r) <= best_w * 1.03]
+    cut_y = sum(r[0] for r in picked) / len(picked)
+    cx = sum((r[1] + r[2]) / 2.0 for r in picked) / len(picked) / w
+
+    cut = cut_y / h
+    pivot_y = min(0.98, cut + PIVOT_DROP)
+
+    print('图        %dx%d' % (w, h))
+    print('脖子那一行 y=%.0f (~%.3f)，宽 %d px = %.3f 窗宽' % (cut_y, cut, best_w, best_w / w))
+    print('支点横向 x=%.3f（脖子中线）' % cx)
+    print()
+    print('抄进 character.json 的 anchors：')
+    print('  "headCut": %.3f,' % cut)
+    print('  "headPivot": [%.3f, %.3f],' % (cx, pivot_y))
+
+    # 合理性检查：脖子必须明显窄于头顶最宽处，否则说明这张图没有脖子
+    widest = max(width(r) for r in rows)
+    if best_w > widest * 0.75:
+        print('\n⚠️ 最窄处是最宽处的 %.0f%% —— 这张图可能没有明显的脖子，'
+              '头层切出来会比较钝。' % (best_w / widest * 100), file=sys.stderr)
+
+    if args.preview:
+        from PIL import ImageDraw
+        dst = im.copy()
+        d = ImageDraw.Draw(dst)
+        d.line([(0, cut_y), (w, cut_y)], fill=(255, 0, 140, 255), width=max(1, h // 200))
+        d.ellipse([cx * w - 3, pivot_y * h - 3, cx * w + 3, pivot_y * h + 3],
+                  outline=(0, 180, 255, 255), width=2)
+        bg = Image.new('RGBA', dst.size, (240, 240, 240, 255))
+        bg.alpha_composite(dst)
+        bg.convert('RGB').save(args.preview)
+        print('预览写到了 %s' % args.preview)
+
+    if args.out:
+        with open(args.out, encoding='utf-8') as f:
+            doc = json.load(f)
+        doc.setdefault('anchors', {})['headCut'] = round(cut, 4)
+        doc['anchors']['headPivot'] = [round(cx, 4), round(pivot_y, 4)]
+        with open(args.out, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(doc, f, ensure_ascii=False, indent=2)
+            f.write('\n')
+        print('已写回 %s（注意：json.dump 会把文件重新排版一遍）' % args.out)
+
+
+main()

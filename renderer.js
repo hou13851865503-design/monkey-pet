@@ -16,6 +16,8 @@
   const tilt = document.getElementById('tilt');
   const gaitEl = document.getElementById('gait');
   const breath = document.getElementById('breath');
+  const headEl = document.getElementById('head');
+  const headImg = headEl ? headEl.querySelector('img') : null;
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const ipc = window.pet || null;
 
@@ -55,6 +57,11 @@
     if (current && imgs[current]) imgs[current].classList.remove('active');
     if (imgs[key]) imgs[key].classList.add('active');
     current = key;
+    // 头层是同一张图的第二份拷贝：换帧必须同步，否则头还是上一张脸。
+    // 图已经在文档里加载过了，这里只是换个 src 指向同一个已解码资源，不会闪白。
+    if (headImg && imgs[key] && headImg.getAttribute('src') !== imgs[key].getAttribute('src')) {
+      headImg.setAttribute('src', imgs[key].getAttribute('src'));
+    }
     // 告诉主进程当前帧，主进程据此做"透明处穿透"的像素判定
     try { if (window.pet && window.pet.setFrame) window.pet.setFrame(key); } catch (_) {}
   }
@@ -181,12 +188,44 @@
   }
   applyCigTip(0);
 
+  // ---- 头层的切线/支点 ----
+  // 头层靠一条横向蒙版把脖子以上切下来。切线在脖子上（轮廓最窄处），
+  // 支点也在脖子上 —— 于是"头转"是绕脖子转，"头沉"是头往下压，身体不动。
+  (function applyHeadGeom() {
+    const g = (window.PetAnim && window.PetAnim.normalize(profile).headGeom) || { cut: 0.645, pivot: [0.5, 0.66] };
+    const st = document.documentElement.style;
+    st.setProperty('--head-cut', (g.cut * 100).toFixed(2) + '%');
+    st.setProperty('--head-px', (g.pivot[0] * 100).toFixed(2) + '%');
+    st.setProperty('--head-py', (g.pivot[1] * 100).toFixed(2) + '%');
+    st.setProperty('--head-feather', ((profile.anchors && profile.anchors.headFeather) || 0.032) * 100 + '%');
+  })();
+
   // 把引擎算出的姿态贴到 #gait（铺满窗口，所以百分比位移 = 窗口比例，天然与尺寸无关）
   function applyPose(pose) {
     gaitEl.style.transform =
       'translate(' + (pose.dx * 100).toFixed(3) + '%, ' + (pose.dy * 100).toFixed(3) + '%)' +
       ' rotate(' + pose.rot.toFixed(2) + 'deg)' +
       ' scale(' + pose.sx.toFixed(4) + ', ' + pose.sy.toFixed(4) + ')';
+
+    // 头层：单独的位移 + 旋转 + 缩放，#gait 那套不参与，所以头和身子可以各动各的。
+    // 头像的缩放支点就在脖子上（蒙版切线下方一点），于是"头缩一下"是头朝脖子压下去
+    // —— 这正是点头的样子，而且蒙版边界不动，不会有接缝。
+    if (headEl) {
+      const hr = pose.headRot || 0, hx = pose.headDx || 0, hy = pose.headDy || 0;
+      const hsx = pose.headSx === undefined ? 1 : pose.headSx;
+      const hsy = pose.headSy === undefined ? 1 : pose.headSy;
+      const on = Math.abs(hr) > 0.12 || Math.abs(hx) > 0.0008 || Math.abs(hy) > 0.0008 ||
+        Math.abs(hsx - 1) > 0.0012 || Math.abs(hsy - 1) > 0.0012;
+      if (on) {
+        headEl.style.transform =
+          'translate(' + (hx * 100).toFixed(3) + '%, ' + (hy * 100).toFixed(3) + '%)' +
+          ' rotate(' + hr.toFixed(2) + 'deg)' +
+          ' scale(' + hsx.toFixed(4) + ', ' + hsy.toFixed(4) + ')';
+      } else if (headEl.style.transform) {
+        headEl.style.transform = '';
+      }
+      document.body.classList.toggle('head-on', on);
+    }
   }
 
   // 只有"走动 / 拖拽 / 播动作"这三件事由引擎决定帧和镜像；

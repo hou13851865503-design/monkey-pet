@@ -2060,6 +2060,32 @@ async function testWalk() {
   app.exit(0);
 }
 
+// 批量动作采样：PET_TEST_CLIPS=a,b,c 依次播放并各截 N 帧，用来肉眼比对
+// "动作到底有没有在动 / 动得像不像它自己那个名字"。单测只能证明数值变了，
+// 证明不了看的人能认出来。
+async function testClips() {
+  const ids = String(process.env.PET_TEST_CLIPS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const out = process.env.PET_TEST_CLIPS_OUT || 'clips';
+  const N = Math.max(2, Number(process.env.PET_TEST_CLIPS_N || 4));
+  await sleep(2000);
+  if (!win) { app.exit(1); return; }
+  const durs = {};
+  ((characterProfile && characterProfile.clips) || []).forEach((c) => { durs[c.id] = c.dur || 1200; });
+  for (const id of ids) {
+    const dur = durs[id] || 1200;
+    const step = Math.max(90, Math.round(dur / (N + 1)));
+    await win.webContents.executeJavaScript(
+      'window.__petAnim.cancel(); window.__petAnim.play(' + JSON.stringify(id) + ', {force:true});');
+    for (let i = 0; i < N; i++) {
+      await sleep(step);
+      const img = await win.webContents.capturePage();
+      fs.writeFileSync(out + '_' + id + '_' + i + '.png', img.toPNG());
+    }
+    console.log('[clips] ' + id + ' dur=' + dur + ' step=' + step);
+  }
+  app.exit(0);
+}
+
 // 自动化动作测试：PET_TEST_CLIP=<动作 id> 在真机上播一次并采样姿态，
 // 用来确认"动作表 -> 引擎 -> DOM"这条链在渲染层真的成立（单测只覆盖到引擎）。
 async function testClip() {
@@ -2077,7 +2103,13 @@ async function testClip() {
       ' frame: window.__petAnim.pose.frame,' +
       ' dy: Math.round(window.__petAnim.pose.dy*10000)/10000,' +
       ' rot: Math.round(window.__petAnim.pose.rot*100)/100,' +
-      ' sy: Math.round(window.__petAnim.pose.sy*10000)/10000})');
+      ' sy: Math.round(window.__petAnim.pose.sy*10000)/10000,' +
+      // 头层：引擎算出来的值 + DOM 上真正生效的 transform，两样都要看。
+      // 只看引擎值证明不了"头真的转了"（可能 CSS 没接上），只看 DOM 又不知道是谁写的。
+      ' headRot: Math.round((window.__petAnim.pose.headRot||0)*10)/10,' +
+      ' headSy: Math.round((window.__petAnim.pose.headSy===undefined?1:window.__petAnim.pose.headSy)*1000)/1000,' +
+      ' headOn: document.body.classList.contains("head-on"),' +
+      ' headTf: (document.getElementById("head").style.transform||"none")})');
     lines.push('t=' + (i * 80) + ' ' + s);
   }
   console.log('[clip] ' + lines.join('\n[clip] '));
@@ -2196,7 +2228,14 @@ function createWindow() {
 }
 
 // ---------- 单实例锁 ----------
-const gotTheLock = app.requestSingleInstanceLock();
+// 自动化测试要能和"正在跑的那只桌宠"同时存在：否则锁会让测试进程立刻静默退出，
+// 屏幕上什么都没有、日志也没有一行 —— 排查起来特别像"启动就崩"。
+const TEST_ENV = [
+  'PET_TEST_CLIPS', 'PET_TEST_CLIP', 'PET_TEST_WALK', 'PET_TEST_DRAG',
+  'PET_TEST_TAP', 'PET_TEST_EMOTION', 'PET_TEST_RECT', 'PET_TEST_SHOTS', 'PET_TEST_ACTION',
+];
+const testRun = TEST_ENV.some((k) => !!process.env[k]);
+const gotTheLock = testRun ? true : app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
@@ -2224,6 +2263,7 @@ if (!gotTheLock) {
     if (process.env.PET_TEST_DRAG) testDrag();
     if (process.env.PET_TEST_WALK) testWalk();
     if (process.env.PET_TEST_CLIP) testClip();
+    if (process.env.PET_TEST_CLIPS) testClips();
     if (process.env.PET_TEST_TAP) testTap();
     if (process.env.PET_TEST_EMOTION) {
       setTimeout(() => emitEmotion('angry'), 2200);

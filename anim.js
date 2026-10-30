@@ -27,7 +27,15 @@
   const smooth = (t) => t * t * (3 - 2 * t);
 
   // 中性姿态：所有关键帧的偏差都相对它缩放
-  const NEUTRAL = { dx: 0, dy: 0, rot: 0, sx: 1, sy: 1 };
+  //
+  // 前五个通道作用于整只动物，后三个（head*）只作用于**头**。
+  // 为什么要单独给头留通道：素材是单张位图，没有骨骼关节，整只一起平移/旋转时
+  // "点头""摇头""歪头"看起来都是"整只猴子晃了一下"，人眼分不出来。把头从脖子处
+  // 单切一层之后，头自己转 = 摇头、头自己沉 = 点头、头一半靠过去 = 歪头，才成立。
+  const NEUTRAL = {
+    dx: 0, dy: 0, rot: 0, sx: 1, sy: 1,
+    headRot: 0, headDx: 0, headDy: 0, headSx: 1, headSy: 1,
+  };
 
   // ---------- 档案规范化 ----------
   function normalize(raw) {
@@ -57,6 +65,16 @@
     };
     p.anchorFoot = clamp(num(p.anchors.foot, 0.995), 0.5, 1.2);
 
+    // 脖子切线的位置（纵向比例）和头的旋转支点（横纵比例）。
+    // 源码给的是"头顶那层从哪一行开始不再跟着身子"——量法见 tools/measure-neck.py：
+    // 找轮廓宽度最小的那一行，就是下巴和肩膀之间的脖子。
+    p.headGeom = {
+      cut: clamp(num(p.anchors.headCut, 0.645), 0.15, 0.95),
+      pivot: Array.isArray(p.anchors.headPivot) && p.anchors.headPivot.length === 2
+        ? [clamp(num(p.anchors.headPivot[0], 0.5), 0, 1), clamp(num(p.anchors.headPivot[1], 0.66), 0, 1)]
+        : [0.5, 0.66],
+    };
+
     // 帧名解析：先查 emotions（cheer/shy…），再查顶层（front/side/turnA…）
     const emo = p.frames.emotions || {};
     p.resolveFrame = function (name) {
@@ -85,7 +103,11 @@
   // ---------- 关键帧采样 ----------
   // 只插值关键帧里出现过的通道：没写的通道保持中性，于是"只改一个通道"的动作
   // 不会把别的通道拽回中性值。
-  const CHANNELS = ['dx', 'dy', 'rot', 'sx', 'sy'];
+  // 通道顺序有讲究：整只的在前面，头的在后面。渲染层会分别贴到 #gait 和 #head
+  // 两个不同的层上，所以它们互不覆盖 —— 可以同时"身体下沉 + 头往下点"。
+  const CHANNELS = ['dx', 'dy', 'rot', 'sx', 'sy', 'headRot', 'headDx', 'headDy', 'headSx', 'headSy'];
+  const BODY_CHANNELS = ['dx', 'dy', 'rot', 'sx', 'sy'];
+  const HEAD_CHANNELS = ['headRot', 'headDx', 'headDy', 'headSx', 'headSy'];
   function sampleKeys(keys, t) {
     const out = { frame: '' };
     CHANNELS.forEach((k) => { out[k] = NEUTRAL[k]; });
@@ -291,7 +313,9 @@
         st.now += dt;
 
         // 1) 动作关键帧
-        let pose = { dx: 0, dy: 0, rot: 0, sx: 1, sy: 1, frame: '' };
+        let pose = {};
+        CHANNELS.forEach((ch) => { pose[ch] = NEUTRAL[ch]; });
+        pose.frame = '';
         if (st.clip) {
           const c = st.clip;
           const t = (st.now - c.t0) / c.def.dur;
@@ -354,6 +378,8 @@
         st.pose = {
           dx: pose.dx, dy: pose.dy, rot: pose.rot,
           sx: pose.sx, sy: pose.sy,
+          headRot: pose.headRot, headDx: pose.headDx, headDy: pose.headDy,
+          headSx: pose.headSx, headSy: pose.headSy,
           facing: facing || st.walk.dir * (st.walk.on ? 1 : 0),
           frame: P.resolveFrame(frame),
           state: st.state,
@@ -393,5 +419,8 @@
     return clamp(s, 0, 1);
   }
 
-  return { create, normalize, sampleKeys, walkDuration, walkEase, NEUTRAL, clamp };
+  return {
+    create, normalize, sampleKeys, walkDuration, walkEase, NEUTRAL, clamp,
+    CHANNELS, BODY_CHANNELS, HEAD_CHANNELS,
+  };
 });
