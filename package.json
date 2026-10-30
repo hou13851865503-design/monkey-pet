@@ -5,7 +5,9 @@
   "main": "main.js",
   "scripts": {
     "start": "node launcher.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "node tools/test-wb.cjs && node tools/test-paper.cjs && node tools/test-daily.cjs",
+    "test:live": "node tools/test-wb-live.cjs"
   },
   "author": "",
   "license": "MIT",
@@ -33,6 +35,7 @@
       "usage.html",
       "daily.js",
       "paper.js",
+      "wb.js",
       "launcher.js",
       "tools/**/*",
       "assets/**/*"

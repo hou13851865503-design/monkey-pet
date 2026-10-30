@@ -113,15 +113,18 @@ npm run dist
 
 ## ⚙️ 配置
 
-右键小猴 →「AI 设置」，填写：
+右键小猴 →「AI 设置」，接入 **WorkBuddy API**（OpenAI 兼容协议）：
 
-| 字段 | 示例 |
-|---|---|
-| Base URL | `https://api.openai.com/v1`、`https://api.deepseek.com/v1` … |
-| API Key | `sk-...` |
-| 模型 | `gpt-4o-mini`（名片识别需要支持图片输入的视觉模型） |
+| 字段 | 说明 | 示例 |
+|---|---|---|
+| Base URL | 填到 `/v1` 为止，程序自己补 `/chat/completions` | `https://<你的接口地址>/v1` |
+| API Key | WorkBuddy 后台给的 Key | `sk-...` |
+| 模型 | 默认固定 `DeepSeek-V4.1-Flash`，点「改用其他模型」可解锁 | `DeepSeek-V4.1-Flash` |
+| 超时 / 重试 | 默认 25000ms / 2 次，只对限流、5xx、网络异常重试 | `25000` / `2` |
 
-- 点「测试连接」会发一条极小请求验证配置是否可用。
+- **没配也能用**：对话、名片识别提示去配置，PDF 论文解析自动降级成规则抽取，桌宠本身照常跑。
+- **点「测试连接」**会发一条极小请求，失败时直接显示错误码（`auth` / `model-not-found` / `network` / `timeout`…），不用猜。
+- 地址末尾多一个 `/` 会被拼成 `//chat/completions`，已经写到 `/chat/completions` 的又会被重复拼——这两种情况 `wb.js` 都兜住了。
 - 所有设置（含 Key）保存在 `%APPDATA%\monkey-pet\settings.json`，**不会进入仓库**。
 - 出网请求走 Electron `net` 模块，会自动使用系统代理；访问需要代理的接口前请先开启代理。
 
@@ -132,6 +135,7 @@ npm run dist
 - **渲染进程 `renderer.js`**：17 张图叠层，靠 `opacity` 过渡实现切帧连贯；`requestAnimationFrame` 做倾斜缓动；手势状态机区分「点击 / 拖拽 / 长按 / 撸」。
 - **多窗口**：气泡、待办、剪贴板、课程、设置、聊天、名片结果、论文解析、使用说明都是独立窗口，按需创建、关闭即销毁。
 - **论文解析 `paper.js`**：纯 Node 模块（不依赖 Electron，可单独跑测试）。`pdfjs-dist` 逐页抽文字 → 按标题行切章节 → 拼成压缩后的 digest → 交给 LLM；没配 Key 时走同一套字段结构的启发式规则。两条路径输出**同构**，前端不需要分支。
+- **WorkBuddy API `wb.js`**：纯 Node 客户端，只认注入进来的 transport（Electron 里是 `net.request`，测试里是 Node `http`）。负责地址拼接、错误码分类、限流/5xx/网络异常的重试退避、连续失败熔断，以及把各家不同的回复形态（`content` 字符串 / 分段数组 / `reasoning_content`）归一化。**永不抛异常**，所有失败都返回 `{ok:false, code}`，所以接口挂了也不会拖垮桌宠。
 - **每日任务 `daily.js`**：任务只存在"创建那一天"下，`onDate()` 计算某天该看到哪些（没完成的自动顺延），跨天不重置勾选。
 - **网络**：统一走 `net.request`，这样能继承系统代理和证书设置。
 
@@ -143,6 +147,7 @@ preload.js         contextBridge 暴露的 IPC 白名单
 renderer.js        小猴渲染与手势
 daily.js           每日任务数据模型（跨天顺延）
 paper.js           PDF 论文解析（抽文本 / 切章节 / 规则与 LLM 双路抽取）
+wb.js              WorkBuddy API 客户端（地址拼接 / 错误码 / 重试 / 熔断）
 index.html         小猴窗口
 bubble.html        气泡窗口（提示 / 待办 / 倒计时 / 系统状态）
 usage.html         功能速查表
@@ -162,8 +167,8 @@ assets/            八向图与情绪图素材
 | 现象 | 解决 |
 |---|---|
 | 改了代码不生效 | 单实例锁：先右键「退出」再重新打开 |
-| AI 请求失败 | 检查 Base URL / Key / 模型名；确认代理已开启 |
-| 名片识别无结果 | 换用支持图片输入的视觉模型 |
+| AI 请求失败 | 打开「AI 设置」点「测试连接」，按错误码排查：`auth`=Key 不对、`model-not-found`=模型名不对、`network`=没网/没开代理、`timeout`=接口慢 |
+| 名片识别无结果 | `DeepSeek-V4.1-Flash` 是纯文本模型，点「改用其他模型」换视觉模型 |
 | TTS 没声音 | Windows 设置 → 时间和语言 → 语音，添加中文语音 |
 | 论文解析提示「可能是扫描件」 | PDF 里没有可选中文字，需先做 OCR；不配 Key 也能用规则抽取 |
 | 网速显示 N/A | PowerShell 的 `Get-NetAdapterStatistics` 不可用，CPU/内存不受影响 |

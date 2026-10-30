@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld('pet', {
   openAiSettings: () => ipcRenderer.send('open-ai-settings'),
   openChat: () => ipcRenderer.send('open-chat'),
   chat: (messages) => ipcRenderer.invoke('llm-chat', messages),
+  // WorkBuddy API 自检 / 状态（设置页用）
+  wbTest: (cfg) => ipcRenderer.invoke('wb-test', cfg),
+  wbStatus: () => ipcRenderer.invoke('wb-status'),
   extractCard: (filePath) => ipcRenderer.send('extract-card', filePath),
   morningReport: () => ipcRenderer.send('morning-report'),
 

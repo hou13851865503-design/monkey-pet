@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn, execFile } = require('child_process');
+const wb = require('./wb');
 
 const WIN_W = 192;
 const WIN_H = 223;
@@ -23,7 +24,10 @@ const PEEK_DELAY = 4000;     // 停靠后多久自动缩进
 const BUBBLE_W = 248;        // 气泡窗宽度
 
 // ---------- 设置持久化 ----------
-const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+// 测试时可用 PET_SETTINGS_PATH 指到临时文件，避免把测试配置写进真实 settings.json
+const settingsPath = process.env.PET_SETTINGS_PATH
+  ? path.resolve(process.env.PET_SETTINGS_PATH)
+  : path.join(app.getPath('userData'), 'settings.json');
 // 测试时可用 PET_DAILY_PATH 指到临时文件，避免把样例任务写进真实数据
 const dailyPath = process.env.PET_DAILY_PATH
   ? path.resolve(process.env.PET_DAILY_PATH)
@@ -43,7 +47,9 @@ const settings = {
   courses: [],          // { day:1-7, time:'HH:MM', name, room }
   reminders: [],        // { date:'YYYY-M-D', time:'HH:MM', name }
   remindBefore: 10,     // 提前多少分钟提醒
-  ai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
+  // WorkBuddy API（OpenAI 兼容）。baseUrl 留空 = 未配置，所有 AI 功能会自动降级而不是报错。
+  // 地址填到 /v1 为止即可，wb.js 会自己补 /chat/completions
+  ai: { baseUrl: '', apiKey: '', model: 'DeepSeek-V4.1-Flash', timeoutMs: 25000, maxRetries: 2 },
   city: '南京',
   tts: false,           // 是否语音朗读
   autoMood: true,       // 空闲时自己换状态（环顾/换表情/小跳）
@@ -53,6 +59,18 @@ const settings = {
 };
 function loadSettings() {
   try { Object.assign(settings, JSON.parse(fs.readFileSync(settingsPath, 'utf8'))); } catch (_) {}
+  migrateAi();
+}
+// 老版本的默认值是 gpt-4o-mini + api.openai.com，从没改过的人升级后应该自动切到 WorkBuddy。
+// 只要用户填过 Key 就一律不动 —— 那是他自己配的，改掉就是行为回归。
+function migrateAi() {
+  const ai = settings.ai && typeof settings.ai === 'object' ? settings.ai : {};
+  const oldDefaultUrl = ai.baseUrl === 'https://api.openai.com/v1' || ai.baseUrl === 'https://api.openai.com/v1/';
+  if (!String(ai.apiKey || '').trim() && oldDefaultUrl) ai.baseUrl = '';
+  if (!ai.model || ai.model === 'gpt-4o-mini') ai.model = wb.DEFAULTS.model;
+  if (!Number.isFinite(Number(ai.timeoutMs)) || Number(ai.timeoutMs) <= 0) ai.timeoutMs = wb.DEFAULTS.timeoutMs;
+  if (!Number.isFinite(Number(ai.maxRetries))) ai.maxRetries = wb.DEFAULTS.maxRetries;
+  settings.ai = ai;
 }
 function saveSettings() {
   try { fs.writeFileSync(settingsPath, JSON.stringify(settings)); } catch (_) {}
@@ -968,23 +986,62 @@ function httpJson(url, opts, timeout) {
     req.end();
   });
 }
-function aiBase() {
-  return String((settings.ai && settings.ai.baseUrl) || 'https://api.openai.com/v1').replace(/\/+$/, '');
+// ---------- WorkBuddy API ----------
+// wb.js 只认注入进来的 transport，这里把 Electron 的 net.request 包一层递进去：
+// 好处是继续走 Chromium 网络栈（自动继承系统代理 / 证书），同时保留了非 2xx 的状态码，
+// 让 wb.js 自己去分类（httpJson 是"非 2xx 就 reject"，会把错误码丢掉）。
+function netTransport(url, req) {
+  return new Promise((resolve, reject) => {
+    let r;
+    try {
+      r = net.request({ url: url, method: (req && req.method) || 'GET' });
+    } catch (e) { return reject(e); }
+    const headers = (req && req.headers) || {};
+    Object.keys(headers).forEach((k) => { try { r.setHeader(k, headers[k]); } catch (_) {} });
+
+    let settled = false;
+    const finish = (fn, v) => { if (settled) return; settled = true; clearTimeout(timer); fn(v); };
+    const timer = setTimeout(() => {
+      const e = new Error('请求超时');
+      e.code = 'ETIMEDOUT';
+      try { r.abort(); } catch (_) {}
+      finish(reject, e);
+    }, (req && req.timeoutMs) || 25000);
+
+    r.on('response', (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => finish(resolve, {
+        status: res.statusCode,
+        headers: res.headers || {},
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+      res.on('error', (e) => finish(reject, e));
+    });
+    r.on('error', (e) => finish(reject, e));
+
+    if (req && req.body) { try { r.write(req.body); } catch (_) {} }
+    r.end();
+  });
+}
+
+const wbClient = wb.createClient({
+  transport: netTransport,
+  getConfig: () => settings.ai || {},
+});
+
+// 所有 AI 功能共用的入口：失败只回 ok:false，绝不抛
+// onFail 用来把错误写进日志，方便排查"为什么今天不说话了"
+function wbChat(opts) {
+  return wbClient.chat(opts).catch((e) => ({
+    ok: false, code: 'internal', message: String((e && e.message) || e),
+    hint: '内部错误', retryable: false,
+  }));
 }
 async function llmChat(messages) {
-  const ai = settings.ai || {};
-  if (!ai.apiKey) return { ok: false, error: '未配置 API 密钥，请先打开「AI 设置」填写' };
-  try {
-    const data = await httpJson(aiBase() + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ai.apiKey },
-      body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', messages, temperature: 0.7, max_tokens: 512 }),
-    }, 25000);
-    const text = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
-    return { ok: true, text: String(text || '（空回复）') };
-  } catch (e) {
-    return { ok: false, error: '请求失败：' + String(e.message || e) };
-  }
+  const r = await wbChat({ messages, temperature: 0.7, maxTokens: 512 });
+  if (!r.ok) return { ok: false, error: r.hint || r.message, code: r.code, detail: r.message };
+  return { ok: true, text: r.text, usage: r.usage, model: r.model };
 }
 function parseJsonLoose(s) {
   if (!s) return null;
@@ -1001,8 +1058,6 @@ function mimeFromPath(p) {
   return 'image/jpeg';
 }
 async function extractCardFromFile(filePath) {
-  const ai = settings.ai || {};
-  if (!ai.apiKey) return { ok: false, error: '未配置 API 密钥，请先打开「AI 设置」填写' };
   if (!filePath) return { ok: false, error: '没拿到图片路径（请直接把图片文件拖到小猴身上）' };
   let b64;
   try { b64 = fs.readFileSync(filePath).toString('base64'); } catch (e) { return { ok: false, error: '读取图片失败：' + (e.message || e) }; }
@@ -1014,18 +1069,19 @@ async function extractCardFromFile(filePath) {
       { type: 'image_url', image_url: { url: 'data:' + mimeFromPath(filePath) + ';base64,' + b64 } },
     ],
   }];
-  try {
-    const data = await httpJson(aiBase() + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ai.apiKey },
-      body: JSON.stringify({ model: ai.model || 'gpt-4o-mini', messages, temperature: 0, max_tokens: 600 }),
-    }, 40000);
-    const text = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '';
-    const obj = parseJsonLoose(text);
-    return { ok: true, data: obj || {}, raw: String(text || '') };
-  } catch (e) {
-    return { ok: false, error: '识别失败：' + String(e.message || e) };
+  // 视觉请求慢，单独给更长超时；失败不影响小猴，只是这一次识别不出
+  const r = await wbChat({ messages, temperature: 0, maxTokens: 600, timeoutMs: 40000 });
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: (r.code === 'auth' || r.code === 'no-config')
+        ? r.hint
+        : '识别失败：' + (r.hint || r.message) + '（如果一直失败，可能是这个模型不支持图片输入）',
+      code: r.code,
+    };
   }
+  const obj = parseJsonLoose(r.text);
+  return { ok: true, data: obj || {}, raw: String(r.text || '') };
 }
 function speakText(text) {
   if (!settings.tts) return;
@@ -1154,25 +1210,12 @@ function paperProgress(p) {
 // 有 API Key 就走模型；没有就只用启发式（paper.js 里已经保证两条路径输出同构）
 function paperLlm() {
   const ai = settings.ai || {};
-  if (!ai.apiKey) return null;
+  if (!ai.apiKey || !ai.baseUrl) return null;
   return async (messages, maxTokens) => {
-    try {
-      const data = await httpJson(aiBase() + '/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ai.apiKey },
-        body: JSON.stringify({
-          model: ai.model || 'gpt-4o-mini',
-          messages,
-          temperature: 0.2,          // 结构化抽取要稳，不要发散
-          max_tokens: maxTokens || 2000,
-        }),
-      }, 90000);
-      const text = data && data.choices && data.choices[0] && data.choices[0].message
-        ? data.choices[0].message.content : '';
-      return { ok: true, text: String(text || '') };
-    } catch (e) {
-      return { ok: false, error: String((e && e.message) || e) };
-    }
+    // 结构化抽取要稳，温度压到 0.2；超时放宽到 90s（长论文的 prompt 很大）
+    const r = await wbChat({ messages, temperature: 0.2, maxTokens: maxTokens || 2000, timeoutMs: 90000 });
+    if (!r.ok) return { ok: false, error: r.hint || r.message, code: r.code };
+    return { ok: true, text: r.text };
   };
 }
 
@@ -1269,7 +1312,8 @@ async function pickCardImage() {
 }
 function aiSettingsView() {
   return {
-    ai: settings.ai || { baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini' },
+    ai: settings.ai || { baseUrl: '', apiKey: '', model: wb.DEFAULTS.model, timeoutMs: wb.DEFAULTS.timeoutMs, maxRetries: wb.DEFAULTS.maxRetries },
+    status: wbClient.status(),
     city: settings.city || '南京',
     tts: !!settings.tts,
     morningReport: !!settings.morningReport,
@@ -1280,14 +1324,19 @@ function saveAiSettings(cfg) {
   cfg = cfg || {};
   const ai = cfg.ai || {};
   settings.ai = {
-    baseUrl: String(ai.baseUrl || 'https://api.openai.com/v1').trim(),
+    baseUrl: String(ai.baseUrl || '').trim(),
     apiKey: String(ai.apiKey || '').trim(),
-    model: String(ai.model || 'gpt-4o-mini').trim(),
+    model: String(ai.model || wb.DEFAULTS.model).trim() || wb.DEFAULTS.model,
+    timeoutMs: Math.max(5000, Math.min(Number(ai.timeoutMs) || wb.DEFAULTS.timeoutMs, 180000)),
+    maxRetries: Math.max(0, Math.min(Number(ai.maxRetries) || 0, 4)),
   };
   settings.city = String(cfg.city || '南京').trim() || '南京';
   settings.tts = !!cfg.tts;
   settings.morningReport = !!cfg.morningReport;
   settings.reportTime = /^\d{1,2}:\d{2}$/.test(cfg.reportTime) ? cfg.reportTime : '08:30';
+  // 用户刚改完配置，之前累计的失败次数和熔断状态必须清掉，
+  // 否则"填对了 Key 还要干等 45 秒"会让人以为没生效
+  wbClient.reset();
   saveSettings();
   refreshTray();
   return aiSettingsView();
@@ -1602,6 +1651,23 @@ function registerIpc() {
   ipcMain.handle('get-ai-settings', () => aiSettingsView());
   ipcMain.handle('save-ai-settings', (_e, cfg) => saveAiSettings(cfg));
   ipcMain.handle('llm-chat', (_e, messages) => llmChat(messages));
+  // 连接自检：把真实错误码（auth / model-not-found / network …）回给设置页，
+  // 而不是笼统一句"测试失败"
+  ipcMain.handle('wb-test', async (_e, cfg) => {
+    if (cfg && cfg.ai) {
+      // 允许用"还没保存的"配置先测，省得来回存
+      const keep = settings.ai;
+      settings.ai = Object.assign({}, keep, {
+        baseUrl: String(cfg.ai.baseUrl || '').trim(),
+        apiKey: String(cfg.ai.apiKey || '').trim(),
+        model: String(cfg.ai.model || wb.DEFAULTS.model).trim(),
+      });
+      wbClient.reset();
+      try { return await wbClient.ping(); } finally { settings.ai = keep; wbClient.reset(); }
+    }
+    return wbClient.ping();
+  });
+  ipcMain.handle('wb-status', () => wbClient.status());
   ipcMain.on('open-ai-settings', () => openAiSettings());
   ipcMain.on('open-chat', () => openChat());
   ipcMain.on('open-paper', () => openPaperTool());
@@ -1972,6 +2038,51 @@ if (!gotTheLock) {
         } catch (e) { console.log('[paper-ui] err ' + e.message); }
         app.exit(0);
       }, 3400);
+    }
+    if (process.env.PET_TEST_WB_UI) {
+      // 只截「AI 设置」这一屏，用来确认接入改了之后界面没塌
+      const out = process.env.PET_TEST_WB_UI;
+      setTimeout(() => openAiSettings(), 900);
+      setTimeout(async () => {
+        try {
+          aiWin.show(); aiWin.moveTop();
+          await new Promise((r) => setTimeout(r, 500));
+          const buf = (await aiWin.webContents.capturePage()).toPNG();
+          if (buf.length) fs.writeFileSync(out, buf);
+          console.log('[wb-ui] shot ' + buf.length);
+        } catch (e) { console.log('[wb-ui] err ' + e.message); }
+        app.exit(0);
+      }, 2600);
+    }
+    if (process.env.PET_TEST_WB) {
+      // 端到端：真的走一遍 Electron net.request + wb.js，验证"成功 / 鉴权失败 / 未配置"三条路
+      // 都只回结构化结果、绝不抛，桌宠进程活着
+      const out = process.env.PET_TEST_WB;
+      setTimeout(async () => {
+        const res = {};
+        const base = process.env.PET_TEST_WB_URL || '';
+        const t = (cfg) => { settings.ai = Object.assign({ model: wb.DEFAULTS.model, timeoutMs: 4000, maxRetries: 1 }, cfg); wbClient.reset(); };
+        try {
+          t({ baseUrl: base, apiKey: process.env.PET_TEST_WB_KEY || '' });
+          res.ok = await llmChat([{ role: 'user', content: '你好' }]);
+
+          t({ baseUrl: base, apiKey: 'wrong-key-xxx', maxRetries: 0 });
+          res.auth = await llmChat([{ role: 'user', content: '你好' }]);
+
+          t({ baseUrl: '', apiKey: '' });
+          res.none = await llmChat([{ role: 'user', content: '你好' }]);
+
+          t({ baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'k', maxRetries: 0, timeoutMs: 800 });
+          res.down = await llmChat([{ role: 'user', content: '你好' }]);
+
+          res.status = wbClient.status();
+          res.alive = true;   // 走到这里说明前三次失败都没把进程弄挂
+        } catch (e) {
+          res.fatal = String((e && e.message) || e);
+        }
+        try { fs.writeFileSync(out, JSON.stringify(res, null, 1)); } catch (_) {}
+        app.exit(0);
+      }, 1500);
     }
     if (process.env.PET_TEST_PAPER) {
       const pdf = process.env.PET_TEST_PAPER;

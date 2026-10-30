@@ -36,17 +36,27 @@
 </head>
 <body>
   <h1>AI 设置</h1>
-  <div class="sub">用于「AI 对话」和「名片识别」。填任意 <b>OpenAI 兼容</b> 接口即可（OpenAI / 通义 / DeepSeek / 中转站都行）。</div>
+  <div class="sub">用于「AI 对话」「名片识别」「PDF 论文解析」。接 <b>WorkBuddy API</b>（OpenAI 兼容协议），没配也能用，相关功能会自动降级。</div>
 
   <div class="card">
-    <div class="card-h">接口</div>
-    <label>Base URL</label>
-    <input id="baseUrl" type="text" placeholder="https://api.openai.com/v1" />
+    <div class="card-h">WorkBuddy API</div>
+    <label>Base URL（填到 <code>/v1</code> 为止，程序自己补 <code>/chat/completions</code>）</label>
+    <input id="baseUrl" type="text" placeholder="https://你的-workbuddy-接口地址/v1" />
     <label>API Key</label>
-    <input id="apiKey" type="password" placeholder="sk-..." />
-    <label>模型名（需支持图片输入才能识别名片）</label>
-    <input id="model" type="text" placeholder="gpt-4o-mini" />
-    <div class="hint">例：<code>https://api.deepseek.com/v1</code> + <code>deepseek-chat</code>（纯文本对话可用；名片识别要选视觉模型）。</div>
+    <input id="apiKey" type="password" placeholder="填 WorkBuddy 后台给你的 Key" />
+    <label>模型名 <a id="unlock" href="javascript:void(0)" style="font-size:11px;color:#3b82f6;text-decoration:none">改用其他模型</a></label>
+    <input id="model" type="text" value="DeepSeek-V4.1-Flash" readonly style="background:#f4f6fa;color:#5b6478" />
+    <div class="hint">默认固定用 <code>DeepSeek-V4.1-Flash</code>。地址末尾多一个 <code>/</code> 会拼出 <code>//chat/completions</code>，程序已经帮你兜住了；已经写到 <code>/chat/completions</code> 的也不会被重复拼。</div>
+    <div class="row2" style="margin-top:10px">
+      <div>
+        <label>超时（毫秒）</label>
+        <input id="timeoutMs" type="number" min="5000" max="180000" step="1000" value="25000" />
+      </div>
+      <div>
+        <label>失败重试次数</label>
+        <input id="maxRetries" type="number" min="0" max="4" step="1" value="2" />
+      </div>
+    </div>
     <div id="status"></div>
     <div style="margin-top:10px"><button id="testBtn" class="btn ghost">测试连接</button></div>
   </div>
@@ -79,19 +89,39 @@
         if (!api.getAiSettings) return;
         const d = (await api.getAiSettings()) || {};
         const ai = d.ai || {};
-        $('baseUrl').value = ai.baseUrl || 'https://api.openai.com/v1';
+        $('baseUrl').value = ai.baseUrl || '';
         $('apiKey').value = ai.apiKey || '';
-        $('model').value = ai.model || 'gpt-4o-mini';
+        $('model').value = ai.model || 'DeepSeek-V4.1-Flash';
+        $('timeoutMs').value = ai.timeoutMs || 25000;
+        $('maxRetries').value = Number.isFinite(Number(ai.maxRetries)) ? ai.maxRetries : 2;
         $('city').value = d.city || '南京';
         $('reportTime').value = d.reportTime || '08:30';
         $('morningReport').checked = !!d.morningReport;
         $('tts').checked = !!d.tts;
+        // 熔断中还剩多少秒，直接告诉用户，省得以为坏了
+        const st = (d.status || {});
+        if (st.breakerLeftMs > 0) $('status').textContent = '接口连续失败，冷却中（约 ' + Math.ceil(st.breakerLeftMs / 1000) + ' 秒）';
       } catch (_) {}
     }
 
+    $('unlock').addEventListener('click', () => {
+      const m = $('model');
+      m.readOnly = false;
+      m.style.background = '';
+      m.style.color = '';
+      m.focus();
+      $('unlock').style.display = 'none';
+    });
+
     function collect() {
       return {
-        ai: { baseUrl: $('baseUrl').value.trim(), apiKey: $('apiKey').value.trim(), model: $('model').value.trim() },
+        ai: {
+          baseUrl: $('baseUrl').value.trim(),
+          apiKey: $('apiKey').value.trim(),
+          model: $('model').value.trim() || 'DeepSeek-V4.1-Flash',
+          timeoutMs: Number($('timeoutMs').value) || 25000,
+          maxRetries: Number($('maxRetries').value) || 0,
+        },
         city: $('city').value.trim(),
         reportTime: $('reportTime').value || '08:30',
         morningReport: $('morningReport').checked,
@@ -109,13 +139,22 @@
 
     $('testBtn').addEventListener('click', async () => {
       const st = $('status');
-      st.textContent = '先保存再测试…';
+      st.textContent = '测试中…';
       try {
-        if (api.saveAiSettings) await api.saveAiSettings(collect());
-        st.textContent = '测试中…';
-        const r = await api.chat([{ role: 'user', content: '只回复两个字：收到' }]);
-        st.textContent = r && r.ok ? '连接成功：' + r.text.slice(0, 60) : '连接失败：' + ((r && r.error) || '未知错误');
-      } catch (e) { st.textContent = '测试失败：' + (e.message || e); }
+        // 用"还没保存的"配置去测，改了就地验证，不用先存
+        const r = api.wbTest
+          ? await api.wbTest(collect())
+          : await api.chat([{ role: 'user', content: '只回复两个字：收到' }]);
+        if (r && r.ok) {
+          st.textContent = '连接成功 ✓ ' + (r.model || '') + (r.ms ? '（' + r.ms + 'ms）' : '');
+          st.style.color = '#1a7f4b';
+        } else {
+          // 失败时把错误码也给出来，方便对着排查（auth / model-not-found / network …）
+          st.textContent = '连接失败：' + ((r && (r.hint || r.error)) || '未知错误') +
+            (r && r.code ? '  [' + r.code + ']' : '');
+          st.style.color = '#c0392b';
+        }
+      } catch (e) { st.textContent = '测试失败：' + (e.message || e); st.style.color = '#c0392b'; }
     });
 
     load();
