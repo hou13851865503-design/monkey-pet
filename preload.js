@@ -53,10 +53,20 @@ contextBridge.exposeInMainWorld('pet', {
   // ---------- 气泡窗口接收内容 ----------
   onBubble: (cb) => ipcRenderer.on('bubble', (_e, payload) => cb(payload)),
 
-  // ---------- 今日待办 ----------
+  // ---------- 今日待办 / 每日任务 ----------
   getTodos: () => ipcRenderer.invoke('get-todos'),
   saveTodos: (items) => ipcRenderer.invoke('save-todos', items),
   openTodoEditor: () => ipcRenderer.send('open-todo-editor'),
+
+  dailyGet: () => ipcRenderer.invoke('daily-get'),
+  dailyAdd: (input) => ipcRenderer.invoke('daily-add', input),
+  dailyUpdate: (ref, patch) => ipcRenderer.invoke('daily-update', ref, patch),
+  dailyToggle: (ref, done) => ipcRenderer.invoke('daily-toggle', ref, done),
+  dailyRemove: (ref) => ipcRenderer.invoke('daily-remove', ref),
+  dailySetRemind: (patch) => ipcRenderer.invoke('daily-remind-set', patch),
+  dailyMuteToday: () => ipcRenderer.invoke('daily-mute-today'),
+  dailyRemindNow: () => ipcRenderer.invoke('daily-remind-now'),
+  onDailyChanged: (cb) => ipcRenderer.on('daily-changed', (_e, state) => cb(state)),
 
   // ---------- 剪贴板历史 ----------
   getClipHistory: () => ipcRenderer.invoke('get-clip'),

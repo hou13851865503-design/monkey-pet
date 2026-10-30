@@ -24,14 +24,22 @@ const BUBBLE_W = 248;        // 气泡窗宽度
 
 // ---------- 设置持久化 ----------
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
+// 测试时可用 PET_DAILY_PATH 指到临时文件，避免把样例任务写进真实数据
+const dailyPath = process.env.PET_DAILY_PATH
+  ? path.resolve(process.env.PET_DAILY_PATH)
+  : path.join(app.getPath('userData'), 'daily.json');   // 每日任务（单独存，别把 settings 撑大）
 const settings = {
   clickThrough: false,
   openAtLogin: true,
   zoom: 1,
   pos: null,
   antiDisturb: true,
-  todos: [],
+  todos: [],            // 旧版纯文本待办，仅用于一次性迁移到 daily.json
   todosDate: '',
+  dailyRemind: true,    // 每 10 分钟提醒"还有哪些没做完"
+  remindFrom: 8,        // 提醒时段：开始（含）
+  remindTo: 23,         // 提醒时段：结束（不含），凌晨不打扰
+  mutedDate: '',        // 这一天点了"今天不再提醒"
   courses: [],          // { day:1-7, time:'HH:MM', name, room }
   reminders: [],        // { date:'YYYY-M-D', time:'HH:MM', name }
   remindBefore: 10,     // 提前多少分钟提醒
@@ -50,6 +58,12 @@ function saveSettings() {
   try { fs.writeFileSync(settingsPath, JSON.stringify(settings)); } catch (_) {}
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// 本地日期键 YYYY-MM-DD（不要用 toISOString，那是 UTC，早上 8 点前会差一天）
+function todayStr(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 // ---------- 崩溃 / 异常日志（排查闪退用）----------
 // 写到 %APPDATA%\monkey-pet\crash.log，出现问题时把这个文件发我就能定位。
@@ -500,34 +514,67 @@ function focusDone() {
 }
 function toggleFocus() { if (focusActive()) focusStop(false); else focusStart(); }
 
-// ---------- 今日待办 ----------
-function todayStr() {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-function ensureTodosFresh() {
-  if (settings.todosDate !== todayStr()) {
-    settings.todos = (settings.todos || []).map((t) => ({ text: t.text, done: false }));
-    settings.todosDate = todayStr();
-    saveSettings();
+// ---------- 今日待办 / 每日任务 ----------
+// 数据在 daily.json，语义见 daily.js：
+//   任务只挂在"创建那天"，没做完逐日顺延，completedOn 记录完成日。
+//   所以"今天要做什么"是 onDate() 算出来的，不存在"每天重置勾选"这回事。
+const daily = require('./daily');
+const DAILY_REMIND_MIN = 10;          // 提醒频率：每 10 分钟
+let dailyStore = null;
+function dstore() {
+  if (!dailyStore) {
+    dailyStore = daily.load(dailyPath, settings.todos);
+    // 迁移完立刻落盘，并把旧清单清空（避免下次又迁移一遍）
+    daily.save(dailyPath, dailyStore);
+    if ((settings.todos || []).length) { settings.todos = []; settings.todosDate = todayStr(); saveSettings(); }
   }
+  return dailyStore;
 }
-function todoData() { ensureTodosFresh(); return settings.todos || []; }
-function saveTodos(items) {
-  settings.todos = (Array.isArray(items) ? items : [])
-    .filter((t) => t && String(t.text || '').trim())
-    .map((t) => ({ text: String(t.text).trim().slice(0, 120), done: !!t.done }));
-  settings.todosDate = todayStr();
-  saveSettings();
-  refreshTray();
+function dailySave() { daily.save(dailyPath, dailyStore); }
+function dailyState() {
+  const today = todayStr();
+  const items = daily.onDate(dstore(), today);
+  return {
+    today,
+    items: items.map((it) => ({
+      ref: it.ref,
+      day: it.key,
+      title: it.task.title,
+      type: it.task.type,
+      minutes: it.task.minutes,
+      start: it.task.start,
+      deadline: it.task.deadline,
+      done: it.done,
+      carried: it.carried,
+      overdue: it.overdue,
+    })),
+    stats: daily.stats(items),
+    remind: {
+      on: settings.dailyRemind !== false,
+      from: settings.remindFrom,
+      to: settings.remindTo,
+      muted: settings.mutedDate === today,
+      everyMin: DAILY_REMIND_MIN,
+    },
+  };
+}
+// 气泡里那一行怎么写：标题 + 今天截止/逾期/顺延（入参是 dailyState 展平后的 item）
+function taskLine(it) {
+  let s = it.title;
+  if (it.deadline && it.deadline === todayStr()) s += '（今天截止）';
+  else if (it.overdue > 0) s += `（已逾期 ${it.overdue} 天）`;
+  else if (it.carried > 0) s += `（顺延 ${it.carried} 天）`;
+  return s;
+}
+function todoData() {
+  return dailyState().items.map((it) => ({ text: it.title, done: it.done }));
 }
 function openTodoEditor() {
-  ensureTodosFresh();
+  dstore();
   if (todoWin) { todoWin.show(); todoWin.focus(); return; }
   todoWin = new BrowserWindow({
-    width: 340,
-    height: 460,
+    width: 380,
+    height: 560,
     title: '今日待办',
     resizable: true,
     autoHideMenuBar: true,
@@ -540,6 +587,109 @@ function openTodoEditor() {
   });
   todoWin.loadFile('todo.html');
   todoWin.on('closed', () => { todoWin = null; });
+}
+// 任务变了：通知待办窗口 + 刷新托盘
+function dailyChanged() {
+  dailySave();
+  if (todoWin && !todoWin.isDestroyed()) {
+    try { todoWin.webContents.send('daily-changed', dailyState()); } catch (_) {}
+  }
+  try { refreshTray(); } catch (_) {}
+}
+
+// ---------- 未完成任务提醒 ----------
+// 触发：启动后 90 秒首检，之后每 60 秒巡一次，两次提醒之间至少隔 DAILY_REMIND_MIN(10) 分钟。
+// 为什么不是 setInterval(10min)：电脑睡眠/唤醒会让定时器漂移，用"每分钟看一眼是否满 10 分钟"
+// 更稳，也不会因为休眠后一次性攒出好几条提醒。
+// 停止条件见 shouldRemind()。
+const REMIND_GAP_MS = DAILY_REMIND_MIN * 60 * 1000;
+let lastDailyRemindAt = 0;
+let dailyRemindTimer = null;
+let allDoneNotifiedDate = '';
+
+function remindWindowOpen(now = new Date()) {
+  const h = now.getHours() + now.getMinutes() / 60;
+  const from = Number.isFinite(+settings.remindFrom) ? +settings.remindFrom : 8;
+  const to = Number.isFinite(+settings.remindTo) ? +settings.remindTo : 23;
+  return h >= from && h < to;
+}
+function remindBlockedReason() {
+  const today = todayStr();
+  if (settings.dailyRemind === false) return 'off';
+  if (settings.mutedDate === today) return 'muted';
+  if (!win || win.isDestroyed() || !win.isVisible()) return 'hidden';
+  if (!remindWindowOpen()) return 'quiet-hours';
+  return '';
+}
+
+function showTodayTasksBubble(ms = 8000) {
+  const st = dailyState();
+  const pending = st.items.filter((i) => !i.done);
+  if (!pending.length) {
+    showBubble({ kind: 'list', title: '今日任务都完成了', items: [
+      { text: `共 ${st.stats.done} 项，全部勾掉了` },
+    ] }, ms);
+    return;
+  }
+  const MAX = 6;
+  const items = pending.slice(0, MAX).map((i) => ({ text: taskLine(i) }));
+  if (pending.length > MAX) items.push({ text: `…还有 ${pending.length - MAX} 项没列出` });
+  showBubble({ kind: 'list', title: `今日待办 · ${pending.length} 项未完成`, items }, ms);
+}
+
+function notifyPending(pending, st) {
+  const MAX = 6;
+  // 一行只放标题 + 一个状态词：气泡很窄，再堆分钟数就会折行折得很难看
+  const items = pending.slice(0, MAX).map((i) => ({ text: taskLine(i) }));
+  if (pending.length > MAX) items.push({ text: `…还有 ${pending.length - MAX} 项` });
+  const m = st.stats.minutes;
+  const eta = m >= 60 ? `${(m / 60).toFixed(1)} 小时` : `${m} 分钟`;
+  emitEmotion(pending.length >= 4 ? 'thinking' : 'sad');
+  showBubble({
+    kind: 'list',
+    title: `还有 ${pending.length} 项没完成 · 约 ${eta}`,
+    items,
+  }, 15000);
+}
+
+function dailyTick() {
+  const blocked = remindBlockedReason();
+  if (blocked) return;
+  const st = dailyState();
+  const pending = st.items.filter((i) => !i.done);
+
+  // 全部完成 => 当天只在第一次达成时道贺一句，然后自然静默
+  if (!pending.length) {
+    if (st.items.length && allDoneNotifiedDate !== st.today) {
+      allDoneNotifiedDate = st.today;
+      emitEmotion('cheer');
+      showBubble({ title: '今日任务全部完成', text: `${st.stats.done} 项全清，剩下的时间归你～` }, 7000);
+    }
+    return;
+  }
+  if (Date.now() - lastDailyRemindAt < REMIND_GAP_MS) return;
+  lastDailyRemindAt = Date.now();
+  notifyPending(pending, st);
+}
+
+function startDailyWatch() {
+  clearInterval(dailyRemindTimer);
+  setTimeout(dailyTick, 90 * 1000);            // 开机别一上来就弹
+  dailyRemindTimer = setInterval(dailyTick, 60 * 1000);
+}
+function setDailyRemind(on) {
+  settings.dailyRemind = !!on;
+  if (settings.dailyRemind) settings.mutedDate = '';
+  lastDailyRemindAt = 0;
+  saveSettings();
+  refreshTray();
+}
+function muteToday() {
+  settings.mutedDate = todayStr();
+  saveSettings();
+  refreshTray();
+  showBubble({ title: '好的', text: '今天的任务提醒就先关掉了，明天继续' }, 3600);
+  emitEmotion('wink');
 }
 
 // ---------- 剪贴板历史 ----------
@@ -1225,7 +1375,19 @@ function menuTemplate() {
   t.push({ type: 'separator' });
   t.push({ label: focusActive() ? '停止专注' : '开始专注 25 分钟', click: toggleFocus });
   t.push({ label: '今日待办…（编辑）', click: openTodoEditor });
-  t.push({ label: '查看今日待办', click: () => showBubble({ kind: 'list', title: '今日待办', items: todoData() }, 7000) });
+  t.push({ label: '查看今日待办', click: () => showTodayTasksBubble(9000) });
+  t.push({
+    label: `未完成提醒（每 ${DAILY_REMIND_MIN} 分钟）`,
+    type: 'checkbox',
+    checked: settings.dailyRemind !== false,
+    click: () => setDailyRemind(!(settings.dailyRemind !== false)),
+  });
+  t.push({ label: '现在提醒一次', click: () => { lastDailyRemindAt = 0; dailyTick(); } });
+  t.push({
+    label: settings.mutedDate === todayStr() ? '今天已不再提醒' : '今天不再提醒',
+    enabled: settings.mutedDate !== todayStr(),
+    click: muteToday,
+  });
   t.push({ type: 'separator' });
   t.push({ label: '课程/日程…（编辑）', click: openScheduleEditor });
   t.push({ label: '查看今日课程', click: showTodayCoursesBubble });
@@ -1289,7 +1451,56 @@ function registerIpc() {
   ipcMain.on('focus-toggle', () => toggleFocus());
   ipcMain.on('open-todo-editor', () => openTodoEditor());
   ipcMain.handle('get-todos', () => todoData());
-  ipcMain.handle('save-todos', (_e, items) => { saveTodos(items); return settings.todos; });
+  ipcMain.handle('save-todos', (_e, items) => {
+    // 兼容旧的纯文本接口：把传来的清单当成"今天新建的任务"补进去（已存在的不重复）
+    const today = todayStr();
+    const cur = daily.onDate(dstore(), today).map((i) => i.task.title);
+    (Array.isArray(items) ? items : []).forEach((t) => {
+      const title = String((t && t.text) || '').trim();
+      if (title && !cur.includes(title)) daily.addTask(dstore(), { title }, today);
+    });
+    dailyChanged();
+    return todoData();
+  });
+
+  // ---------- 每日任务 ----------
+  ipcMain.handle('daily-get', () => dailyState());
+  ipcMain.handle('daily-add', (_e, input) => {
+    daily.addTask(dstore(), input || {}, todayStr());
+    dailyChanged();
+    return dailyState();
+  });
+  ipcMain.handle('daily-update', (_e, ref, patch) => {
+    daily.updateTask(dstore(), ref, patch || {});
+    dailyChanged();
+    return dailyState();
+  });
+  ipcMain.handle('daily-toggle', (_e, ref, done) => {
+    daily.setDone(dstore(), ref, done, todayStr());
+    dailyChanged();
+    return dailyState();
+  });
+  ipcMain.handle('daily-remove', (_e, ref) => {
+    daily.removeTask(dstore(), ref);
+    dailyChanged();
+    return dailyState();
+  });
+  ipcMain.handle('daily-remind-set', (_e, patch) => {
+    const p = patch || {};
+    if ('on' in p) setDailyRemind(!!p.on);
+    if (Number.isFinite(+p.from)) settings.remindFrom = clamp(+p.from, 0, 24);
+    if (Number.isFinite(+p.to)) settings.remindTo = clamp(+p.to, 0, 24);
+    if ('on' in p || 'from' in p || 'to' in p) { saveSettings(); refreshTray(); }
+    return dailyState();
+  });
+  ipcMain.handle('daily-mute-today', () => { muteToday(); return dailyState(); });
+  ipcMain.handle('daily-remind-now', () => {
+    lastDailyRemindAt = 0;
+    const blocked = remindBlockedReason();
+    if (blocked) { showTodayTasksBubble(9000); return { ok: true, blocked }; }
+    dailyTick();
+    return { ok: true, blocked: '' };
+  });
 
   ipcMain.on('open-clipboard', () => openClipboard());
   ipcMain.on('pick-clip', (_e, i) => pickClip(i));
@@ -1459,7 +1670,7 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     try { app.setAppUserModelId('com.monkeypet.app'); } catch (_) {}
     loadSettings();
-    ensureTodosFresh();
+    dstore();            // 预热每日任务（顺带完成旧待办的迁移）
     logCrash('boot', 'pid=' + process.pid + ' argv=' + process.argv.slice(1).join(' '));
     createWindow();
     shotMode();
@@ -1553,6 +1764,74 @@ if (!gotTheLock) {
         app.exit(0);
       }, 3000);
     }
+    if (process.env.PET_TEST_TODO) {
+      // 灌几条样例任务（必须先设 PET_DAILY_PATH 指到临时文件）
+      setTimeout(() => {
+        try {
+          const today = todayStr();
+          const y = daily.shiftDay(today, -1), y3 = daily.shiftDay(today, -3);
+          daily.addTask(dstore(), { title: '写完文档解析智能体的评测方案', type: 'required', minutes: 90, deadline: today }, y);
+          daily.addTask(dstore(), { title: '把名片抽取的 baseline 跑一遍', type: 'required', minutes: 45 }, y3);
+          daily.addTask(dstore(), { title: '整理本周组会要讲的三页 PPT', type: 'required', minutes: 60, deadline: daily.shiftDay(today, -1) }, today);
+          const d = daily.addTask(dstore(), { title: '看两篇 RAG 综述', type: 'optional', minutes: 30 }, today);
+          const done = daily.addTask(dstore(), { title: '回复导师邮件', type: 'required', minutes: 10 }, today);
+          daily.setDone(dstore(), done.ref, true, today);
+          dailySave();
+        } catch (e) { console.log('[todo] seed err ' + e.message); }
+      }, 900);
+      setTimeout(() => openTodoEditor(), 1300);
+      setTimeout(async () => {
+        try {
+          const img = await todoWin.webContents.capturePage();
+          fs.writeFileSync(process.env.PET_TEST_TODO, img.toPNG());
+          console.log('[todo] captured');
+          if (process.env.PET_TEST_TODO_ACT) {
+            // 走一遍真实交互：填输入框 -> 点添加 -> 勾掉第一条
+            await todoWin.webContents.executeJavaScript(
+              '(function(){' +
+              ' document.getElementById("inp").value = "刚加的一条测试任务";' +
+              ' document.getElementById("mins").value = "25";' +
+              ' document.getElementById("addBtn").click();' +
+              ' return true; })()'
+            );
+            await sleep(900);
+            const n1 = await todoWin.webContents.executeJavaScript('document.querySelectorAll("li.item").length');
+            await todoWin.webContents.executeJavaScript('document.querySelector("li.item .cb").click()');
+            await sleep(900);
+            const info = await todoWin.webContents.executeJavaScript(
+              '(function(){ return { items: document.querySelectorAll("li.item").length,' +
+              ' done: document.querySelectorAll("li.item.done").length,' +
+              ' stat: document.getElementById("statLeft").textContent }; })()'
+            );
+            console.log('[todo] after act ' + n1 + ' -> ' + JSON.stringify(info));
+            const img2 = await todoWin.webContents.capturePage();
+            fs.writeFileSync(process.env.PET_TEST_TODO.replace(/\.png$/i, '') + '_act.png', img2.toPNG());
+          }
+        } catch (e) { console.log('[todo] err ' + e.message); }
+        app.exit(0);
+      }, 3200);
+    }
+    if (process.env.PET_TEST_REMIND) {
+      // 验证 10 分钟提醒的气泡内容
+      setTimeout(async () => {
+        try {
+          daily.addTask(dstore(), { title: '写完评测方案', type: 'required', minutes: 90, deadline: todayStr() }, todayStr());
+          daily.addTask(dstore(), { title: '跑 baseline', type: 'required', minutes: 45 }, daily.shiftDay(todayStr(), -2));
+          dailySave();
+          lastDailyRemindAt = 0;
+          settings.remindFrom = 0; settings.remindTo = 24;   // 测试时不受"安静时段"限制
+          settings.mutedDate = ''; settings.dailyRemind = true;
+          dailyTick();
+          await sleep(1200);
+          if (bubbleWin && !bubbleWin.isDestroyed()) {
+            const img = await bubbleWin.webContents.capturePage();
+            fs.writeFileSync(process.env.PET_TEST_REMIND, img.toPNG());
+            console.log('[remind] captured');
+          } else { console.log('[remind] no bubble'); }
+        } catch (e) { console.log('[remind] err ' + e.message); }
+        app.exit(0);
+      }, 2600);
+    }
     if (settings.clickThrough) {
       setTimeout(() => showBubble({
         title: '注意',
@@ -1566,6 +1845,7 @@ if (!gotTheLock) {
     startClipWatch();
     startScheduleWatch();
     startMorningWatch();
+    startDailyWatch();
     if (settings.antiDisturb) startAntiDisturb();
     try {
       app.setLoginItemSettings({
