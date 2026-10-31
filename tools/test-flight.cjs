@@ -180,5 +180,117 @@ t('切后台回来一个巨大的 dt 不会跳穿（maxStep 兜底）', () => {
   assert.ok(inArea(b), '5 秒的 dt 把窗口甩出了工作区');
 });
 
+// ---------- 重力（松手后自由下落）----------
+// 这一段守的是"加了重力之后，原来那条无重力的路一点都没变"以及"掉下来真的会停"。
+const GRAV = { gravity: 2200 };
+const maxYOf = (wa, h) => wa.y + wa.height - h;
+
+t('重力默认是 0：不配的地方行为必须和加这个功能之前完全一致', () => {
+  assert.strictEqual(F.DEFAULTS.gravity, 0, 'gravity 默认值不能不是 0（会悄悄改掉所有抛飞的手感）');
+  // 同一条初速跑两遍，一遍显式写 gravity:0，一遍不写 —— 轨迹必须逐帧相同
+  const a = F.body(600, 400, 2200, -900, W, H);
+  const b = F.body(600, 400, 2200, -900, W, H);
+  for (let i = 0; i < 120; i++) {
+    F.step(a, 16, WA, {});
+    F.step(b, 16, WA, { gravity: 0 });
+    assert.strictEqual(a.x, b.x, '第 ' + i + ' 帧 x 不一致');
+    assert.strictEqual(a.y, b.y, '第 ' + i + ' 帧 y 不一致');
+    assert.strictEqual(a.vx, b.vx, '第 ' + i + ' 帧 vx 不一致');
+    assert.strictEqual(a.vy, b.vy, '第 ' + i + ' 帧 vy 不一致');
+  }
+});
+
+t('刚松手那一刻速度是 0，不能判成"已经停了"', () => {
+  const b = F.body(600, 200, 0, 0, W, H);
+  const r = F.step(b, 16, WA, GRAV);
+  assert.strictEqual(r.done, false, '空中速度 0 被误判成停下 —— 宠物会定格在半空');
+  assert.ok(b.y > 200, '第一帧就该开始往下走，实际 y=' + b.y);
+});
+
+t('自由落体：会掉到底边并停住，位置贴着工作区底部', () => {
+  const b = F.body(600, 100, 0, 0, W, H);
+  let i = 0;
+  while (i < 2000) { if (F.step(b, 16, WA, GRAV).done) break; i++; }
+  assert.ok(i < 2000, '没停下来');
+  assert.ok(Math.abs(b.y - maxYOf(WA, H)) < 1e-6, 'y=' + b.y + ' 应停在 ' + maxYOf(WA, H));
+  assert.strictEqual(b.vx, 0);
+  assert.strictEqual(b.vy, 0);
+});
+
+t('坐实之后一像素都不许抖（重力不能每帧攒速度再被地面顶回来）', () => {
+  const b = F.body(600, 100, 0, 0, W, H);
+  while (!F.step(b, 16, WA, GRAV).done) {}
+  const y0 = b.y;
+  for (let i = 0; i < 200; i++) {
+    F.step(b, 16, WA, GRAV);
+    assert.strictEqual(b.y, y0, '第 ' + i + ' 帧抖了：y=' + b.y);
+    assert.strictEqual(b.vy, 0, '第 ' + i + ' 帧竖直速度不是 0：' + b.vy);
+  }
+});
+
+t('落地回弹：弹几下之后衰减到静止，不会永远弹', () => {
+  const b = F.body(600, 100, 0, 0, W, H);
+  let bumps = 0, frames = 0;
+  while (frames < 3000) {
+    const r = F.step(b, 16, WA, GRAV);
+    frames++;
+    bumps += r.bumps.filter((x) => x.axis === 'y' && x.edge === 'bottom').length;
+    if (r.done) break;
+  }
+  assert.ok(bumps >= 1, '一次地都没落');
+  assert.ok(bumps <= 6, '弹了 ' + bumps + ' 次，floorBounce 太弹了');
+  assert.ok(frames < 400, '落地收敛太慢：' + frames + ' 帧');
+});
+
+t('落地能同时记下"撞击那一瞬的速度"（落地压扁按它算）', () => {
+  const b = F.body(600, 100, 0, 0, W, H);
+  let impact = 0;
+  for (let i = 0; i < 3000; i++) {
+    const r = F.step(b, 16, WA, GRAV);
+    if (r.impact > impact) impact = r.impact;
+    if (r.done) break;
+  }
+  assert.ok(impact > 500, '撞击速度只有 ' + Math.round(impact) + 'px/s，落地压扁会看不出来');
+  assert.ok(impact < 4000, '撞击速度 ' + Math.round(impact) + 'px/s 不合理（自由落体不该这么快）');
+});
+
+t('下落过程保留横向速度：一边掉一边横移，撞到侧墙会反弹', () => {
+  const b = F.body(1500, 200, 1500, 0, W, H);
+  let xBumps = 0, frames = 0;
+  while (frames < 3000) {
+    const r = F.step(b, 16, WA, GRAV);
+    frames++;
+    xBumps += r.bumps.filter((x) => x.axis === 'x').length;
+    if (r.done) break;
+  }
+  assert.ok(xBumps >= 1, '横着甩出去却没有撞到侧墙');
+  assert.ok(inArea(b), '落点出界了');
+  assert.ok(b.x < 1500, '横向速度被吃掉了，没往右走过');
+});
+
+t('重力参数填错也炸不了：负数/巨大值都被夹住', () => {
+  const neg = F.normalize({ gravity: -500 });
+  assert.strictEqual(neg.gravity, 0, '负重力 = 反重力往上飘，必须夹成 0');
+  const huge = F.normalize({ gravity: 1e9 });
+  assert.ok(huge.gravity <= 20000, '重力上限没夹住');
+  const crazyBounce = F.normalize({ floorBounce: 5 });
+  assert.ok(crazyBounce.floorBounce <= 0.9, 'floorBounce 太大会变成永动弹球');
+  // 用夹取之后的极限值跑一遍，仍然要停得下来
+  const b = F.body(600, 100, 0, 0, W, H);
+  let i = 0;
+  while (i < 3000) { if (F.step(b, 16, WA, { gravity: 1e9, floorBounce: 5 }).done) break; i++; }
+  assert.ok(i < 3000, '极端参数下停不下来');
+});
+
+t('窗口比工作区还高 + 有重力：贴住就停，不振荡', () => {
+  const tiny = { x: 0, y: 0, width: 1000, height: 100 };
+  const b = F.body(0, 0, 0, 0, 192, 223);
+  for (let i = 0; i < 200; i++) {
+    F.step(b, 16, tiny, GRAV);
+    assert.ok(Number.isFinite(b.y) && b.y >= -0.6, '跑到了负坐标 y=' + b.y);
+  }
+  assert.strictEqual(b.vy, 0, '比工作区高时应把 vy 归零');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

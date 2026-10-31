@@ -672,13 +672,17 @@
     if (ipc.onThrowVel) ipc.onThrowVel((vx, vy) => anim.flyVel(vx, vy));
     if (ipc.onBump) ipc.onBump((axis, power) => anim.bump(axis, power));
     if (ipc.onThrowEnd) {
-      ipc.onThrowEnd((reason, speed, bounces) => {
+      ipc.onThrowEnd((reason, speed, bounces, mode) => {
         // 只有"自己飞累了落地"才压扁。半空被抓住（grab）/ 窗口被隐藏（hide）都不播，
         // 否则那段落地动作会把"被拎在手里"的悬垂姿态顶掉 —— 抓过来的是一只会砸地的猴。
+        // speed 是撞地那一刻的速度（主进程按 impact 给的），所以掉得越高压得越狠。
         anim.endFly(speed, reason === 'stop');
         if (state === 'fly' && reason === 'stop') enter(focusing ? 'focus' : 'idle');
-        // 撞得够狠就吐个星星眼 —— 被扔了一圈之后的固定反馈
-        if (reason === 'stop' && bounces >= 3) setDizzy(Math.min(1800, 500 + bounces * 180));
+        // 撞得够狠就吐个星星眼 —— 被扔了一圈之后的固定反馈。
+        // 掉下来不算：从半空松手落地也会撞好几次，但那是"掉"不是"被甩晕"。
+        if (reason === 'stop' && mode !== 'fall' && bounces >= 3) {
+          setDizzy(Math.min(1800, 500 + bounces * 180));
+        }
       });
     }
 

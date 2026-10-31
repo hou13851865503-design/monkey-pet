@@ -121,6 +121,8 @@
           <tr class="item"><td class="k">自己做动作</td><td class="how">无需操作（菜单可关）</td><td class="note">东张西望 / 歪头看你 / 伸懒腰 / 蹦两下 / 点头 / 摇头 / 蹲一蹲 / 抖一抖 / 打盹 / 挥手 / 打哈欠 / 探头看，共 12 种。间隔 7~18 秒一次，同一动作 40 秒内不重复。每个动作都是单独调的：点头是<b>只有头</b>往下点三下、摇头是头左右转四次、歪头是头歪 11°、伸懒腰和挥手会把<b>双臂举起来</b>、打盹是头一点点垂到底再猛地惊醒</td></tr>
           <tr class="item"><td class="k">自己散步</td><td class="how">无需操作（菜单「自己散步」可关）</td><td class="note">空闲 45 秒~2.5 分钟后走去桌面别处。起步加速、到点收步，脚步跟着实际走过的距离迈，不会打滑</td></tr>
           <tr class="item"><td class="k">甩晕它</td><td class="how">按住快速左右来回甩</td><td class="note">头顶转圈、眼睛变螺旋、身体左右发晃，约 2 秒后自己缓过来；缓过来之前不接受新动作</td></tr>
+          <tr class="item"><td class="k">甩出去 / 松手掉落</td><td class="how">抓着快速一甩 = 飞出去；在半空轻轻松手 = 往下掉</td><td class="note">甩出去会滑行、撞屏幕边缘反弹、几下后停住；松手掉落会受重力往下坠，砸到底边压扁一下、小弹几下停住。斜着松手还会一边掉一边横着飘。重力大小、回弹、阻尼都在 <code>character.json</code> 的 <code>drag.fall</code> 里调</td></tr>
+          <tr class="item"><td class="k">物理拖动开关</td><td class="how">菜单「物理拖动（惯性 / 下落 / 回弹）」</td><td class="note">默认开启。关掉后拖动时窗口死跟光标、松手不再飞也不再掉，只做边缘吸附</td></tr>
           <tr class="item"><td class="k">立刻走两步 / 做个动作</td><td class="how">菜单「走两步」/「做个动作 ▸」</td><td class="note">不用等它自己想起来，直接指挥</td></tr>
           <tr class="item"><td class="k">整点问候</td><td class="how">无需操作</td><td class="note">早晚 / 中午 / 下午 / 深夜不同台词，启动时也会打招呼</td></tr>
           <tr class="item"><td class="k">边缘吸附</td><td class="how">拖到屏幕边缘 16px 内松手</td><td class="note">自动贴边</td></tr>

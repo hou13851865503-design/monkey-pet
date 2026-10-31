@@ -16,24 +16,33 @@ const WIN_W = 192;
 const WIN_H = 223;
 const POLL_MS = 80;          // 指针轮询（喂"撸它" + 贴边探出判定）
 const ZOOM_MIN = 0.5, ZOOM_MAX = 2.5;
-// 拖拽时超过这个速度（像素/秒）持续 ~80ms => 触发眩晕
-const DIZZY_SPEED = 1500;
 
 // ---------- 甩动 / 抛飞 ----------
 // 拖拽时窗口不是"钉在光标上"，而是跟着光标追。手慢的时候精确跟随（否则抓不住），
 // 手越快越追不上 —— 猴子被拉在光标后面甩，这就是"牵引"的手感来源。
-const TRAIL_ON = 420;        // 光标速度超过这个值才开始落后于手
-const TRAIL_FULL = 2600;     // 到这个速度时落后量拉满
-const TRAIL_MAX = 0.42;      // 每 16ms 最多只追 58% 的距离
+//
+// 这四个"手感"参数不写死在这里，而是走 character.json 的 drag 段（见 dragCfg）：
+// 它们属于"换形象/换口味时要重调"的东西，和窗口尺寸无关，和物理也无关。
+const DRAG_DEFAULTS = {
+  trailOn: 420,      // 光标速度超过这个值才开始落后于手
+  trailFull: 2600,   // 到这个速度时落后量拉满
+  trailMax: 0.42,    // 每 16ms 最多只追 58% 的距离
+  smooth: 0.4,       // 松手判定用的速度平滑系数（16ms 内手抖 3px 就是 190px/s，
+                     // 直接用瞬时值会让"这一下算不算甩"完全随缘）
+  dizzySpeed: 1500,  // 拖多快会甩晕（px/s）
+};
 const FLY_TICK = 16;         // 飞行的物理步长（约 60fps）
-const THROW_SMOOTH = 0.4;    // 松手判定用的速度平滑系数（16ms 内手抖 3px 就是 190px/s，
-                             // 直接用瞬时值会让"这一下算不算甩"完全随缘）
 // "甩"必须是**爆发**，不能只是"松手时手还在动"。
 // 反例：把宠物从 A 拖到 B，到地方了手还在滑行（300~700px/s）—— 那是"放下"，
 // 不该变成一次滑行。所以判定要看最近 130ms 里的峰值，
 // 正常拖动到不了峰值阈值，真甩一下轻松超过（甩一次轻松 2000+）。
 const FLICK_WINDOW = 130;    // 看最近多少毫秒的峰值
 const FLICK_KEEP = 0.55;     // 松手那一刻的速度至少要还有峰值的这么多
+// 离屏幕底部（工作区底边）还有多远才值得"掉下去"。
+// 8px 不是随手定的：g=2200 时从 8px 掉下来只要 sqrt(2·8/2200) ≈ 85ms，
+// 一帧都不到——这种"下落"肉眼看不见，却要多开一个定时器、多播一次落地压扁，
+// 还不如直接吸附。也顺手盖住了 setPosition 取整带来的那 1~2px 误差。
+const FALL_MIN_GAP = 8;
 
 const SNAP = 16;             // 距屏幕边缘多少 px 判定吸附
 const PEEK = 44;             // 贴边后露出的像素
@@ -99,6 +108,7 @@ const settings = {
   tts: false,           // 是否语音朗读
   autoMood: true,       // 空闲时自己换状态（环顾/换表情/小跳）
   wander: true,         // 空闲时自己在桌面上散步（走动 + 步态）
+  physicsDrag: true,    // 拖拽带物理：牵引滞后 + 松手甩飞 + 悬空下落 + 边界回弹（关掉 = 死跟手 + 松手吸附）
   morningReport: true,  // 每日早报
   reportTime: '08:30',
   lastReportDate: '',
@@ -330,6 +340,7 @@ function startDrag() {
   dragHist = [];
   fastTicks = 0;
   dizzySent = false;
+  const dc = dragCfg();
   dragPoll = setInterval(() => {
     if (!win || !isDragging) return;
     const cp = screen.getCursorScreenPoint();
@@ -337,13 +348,14 @@ function startDrag() {
     // ---- 牵引：手快时跟不上，手一停就追上去 ----
     // 关键在"每 tick 只追 f 比例的距离"：稳态下窗口会稳定落后手一段距离
     // （落后量 ≈ 速度 × 时间常数），一停就自动收敛回光标下面。
+    // 物理拖动关掉时 f 恒为 1 —— 窗口死钉在光标上，和最早的版本一样。
     const now = Date.now();
     const dt = Math.max(1, now - dragSampleT);
     const sx = cp.x - dragSamplePos.x;
     const sy = cp.y - dragSamplePos.y;
     const speed = Math.hypot(sx, sy) * 1000 / dt;
-    const trail = clamp((speed - TRAIL_ON) / (TRAIL_FULL - TRAIL_ON), 0, 1);
-    const f = 1 - TRAIL_MAX * trail;
+    const trail = clamp((speed - dc.trailOn) / (dc.trailFull - dc.trailOn), 0, 1);
+    const f = physicsDragOn() ? 1 - dc.trailMax * trail : 1;
     dragPos.x += (cp.x - grabOffset.x - dragPos.x) * f;
     dragPos.y += (cp.y - grabOffset.y - dragPos.y) * f;
     try { win.setPosition(Math.round(dragPos.x), Math.round(dragPos.y)); } catch (_) {}
@@ -351,15 +363,15 @@ function startDrag() {
     // ---- 甩得太快 => 眩晕 ----
     // 分轴速度下发给渲染层：横向决定"身体滞后"，纵向决定"被拎起来的拉伸感"
     dragVel = { vx: sx * 1000 / dt, vy: sy * 1000 / dt };
-    dragVelSmooth.vx += (dragVel.vx - dragVelSmooth.vx) * THROW_SMOOTH;
-    dragVelSmooth.vy += (dragVel.vy - dragVelSmooth.vy) * THROW_SMOOTH;
+    dragVelSmooth.vx += (dragVel.vx - dragVelSmooth.vx) * dc.smooth;
+    dragVelSmooth.vy += (dragVel.vy - dragVelSmooth.vy) * dc.smooth;
     dragHist.push({ t: now, sp: speed });
     while (dragHist.length > 40) dragHist.shift();     // 40 × 16ms ≈ 640ms，够用且不涨
     try { win.webContents.send('drag-vel', Math.round(dragVel.vx), Math.round(dragVel.vy)); } catch (_) {}
     dragSamplePos = { x: cp.x, y: cp.y };
     dragSampleT = now;
 
-    if (speed > DIZZY_SPEED) fastTicks++; else fastTicks = Math.max(0, fastTicks - 2);
+    if (speed > dc.dizzySpeed) fastTicks++; else fastTicks = Math.max(0, fastTicks - 2);
     // 16ms 一档，连续 5 档（约 80ms）都超速才算"甩"
     if (fastTicks >= 5 && !dizzySent) {
       dizzySent = true;
@@ -374,21 +386,34 @@ function endDrag() {
   if (dragPoll) { clearInterval(dragPoll); dragPoll = null; }
   lockSize();                              // 同上：只用期望尺寸，别读回 bounds
 
-  // ---- 松手：够快就是"甩出去"，不够快就是"放下" ----
-  // 这一步必须在吸附之前判定，也不能被 snapToEdge 改过位置再算 —— 位置和速度得是
-  // 同一时刻的。判定本身在 flight.launch 里（阈值/限幅都被单测钉住了）。
+  // ---- 松手：三种去向 ----
+  //   ① 够快          => 甩出去（无重力滑行 + 撞墙反弹）
+  //   ② 不够快但悬空   => 重力下落（掉到底边、落地压扁、可能弹一下）
+  //   ③ 不够快又贴地   => 原来的"放下 + 吸附"
+  // 位置和速度必须取同一时刻：判定要在 snapToEdge 改过位置之前做完。
   //
-  // 两条同时成立才算甩：① 最近 130ms 的峰值超过阈值（真甩是爆发，慢拖到不了）
+  // 甩的两条判据同时成立才算：① 最近 130ms 的峰值超过阈值（真甩是爆发，慢拖到不了）
   // ② 松手那一刻速度还剩峰值的 55% 以上（甩完还停住不动了 = 其实是想放下来）。
-  const spNow = Math.hypot(dragVelSmooth.vx, dragVelSmooth.vy);
+  const on = physicsDragOn();
+  const vxOut = dragVelSmooth.vx, vyOutRaw = dragVelSmooth.vy;
+  const spNow = Math.hypot(vxOut, vyOutRaw);
   const minThrow = throwCfg().minThrow;
-  const flick = dragPeak() >= minThrow && spNow >= minThrow * FLICK_KEEP;
-  const L = flick ? flight.launch(dragVelSmooth.vx, dragVelSmooth.vy, throwCfg()) : { on: false };
-  const vyOut = Math.round(dragVelSmooth.vy);
+  const flick = on && dragPeak() >= minThrow && spNow >= minThrow * FLICK_KEEP;
+  const L = flick ? flight.launch(vxOut, vyOutRaw, throwCfg()) : { on: false };
+  const vyOut = Math.round(vyOutRaw);
   dragVel = { vx: 0, vy: 0 };
   dragVelSmooth = { vx: 0, vy: 0 };
   dragHist = [];
-  if (L.on) { startFlight(L.vx, L.vy); return; }
+  if (L.on) { startFlight(L.vx, L.vy, 'throw'); return; }
+
+  // 松手时手还在动、但没到"甩"的阈值：这点速度别扔掉，带进下落里
+  // （斜着把它放到半空，它会一边往下掉一边横向飘 —— 这才是"惯性"）。
+  // 用 launch 做限幅，避免"松手瞬间手抽了一下"变成一次横向弹射。
+  if (on && canFall()) {
+    const F = flight.launch(vxOut, vyOutRaw, Object.assign({}, fallCfg(), { minThrow: 0 }));
+    startFlight(F.vx, F.vy, 'fall');
+    return;
+  }
 
   // 落地反馈：把松手瞬间的竖直速度交给渲染层，速度越大压得越狠。
   // 这个值必须在窗口吸附/重新定位之前发，否则会被 snapToEdge 的时间吃掉。
@@ -403,7 +428,7 @@ function endDrag() {
 // 物理本身在 flight.js（纯函数），这里只做 setPosition 和状态守卫。
 let flyRun = null;        // { b, lastT, px, py, bounces, lastSpeed }
 let flyTimer = null;
-const flyStats = { throws: 0, bounces: 0, stops: 0, aborts: 0 };   // 供测试核对链路
+const flyStats = { throws: 0, drops: 0, landed: 0, bounces: 0, stops: 0, aborts: 0 };   // 供测试核对链路
 
 let throwCfgCache = null;
 function throwCfg() {
@@ -413,9 +438,60 @@ function throwCfg() {
   if (!throwCfgCache) throwCfgCache = flight.normalize(src);
   return throwCfgCache;
 }
+
+// ---- 拖拽手感参数（character.json 的 drag 段）----
+// 单独缓存：拖拽时每 16ms 要用一次，和 throwCfg 一样不该在热路径上重新 normalize。
+const numIn = (v, d, a, b) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(a, Math.min(b, n)) : d;
+};
+let dragCfgCache = null;
+function dragCfg() {
+  if (dragCfgCache) return dragCfgCache;
+  const d = (characterProfile && characterProfile.drag) || {};
+  const D = DRAG_DEFAULTS;
+  dragCfgCache = {
+    // 夹取范围不是随手写的：trailMax 给到 1 就是"永远追不上手"（拖着不动），
+    // trailOn 低于 0 会让窗口从第一帧就开始滞后，抓起来像拖一块湿毛巾。
+    trailOn: numIn(d.trailOn, D.trailOn, 0, 6000),
+    trailFull: numIn(d.trailFull, D.trailFull, 200, 20000),
+    trailMax: numIn(d.trailMax, D.trailMax, 0, 0.9),
+    smooth: numIn(d.smooth, D.smooth, 0.05, 1),
+    dizzySpeed: numIn(d.dizzySpeed, D.dizzySpeed, 400, 20000),
+  };
+  if (dragCfgCache.trailFull <= dragCfgCache.trailOn) dragCfgCache.trailFull = dragCfgCache.trailOn + 1;
+  return dragCfgCache;
+}
+
+// ---- 自由下落物理（character.json 的 drag.fall 覆盖 throw.physics）----
+// 两段合并而不是各写一套：下落和抛飞用的是同一个 flight.step，
+// 差别只在"重力开不开、地板软不软"。分开维护两份参数迟早会漂。
+let fallCfgCache = null;
+function fallCfg() {
+  if (fallCfgCache) return fallCfgCache;
+  const p = (characterProfile && characterProfile.throw && characterProfile.throw.physics) || {};
+  const f = (characterProfile && characterProfile.drag && characterProfile.drag.fall) || {};
+  fallCfgCache = flight.normalize(Object.assign({}, p, f));
+  return fallCfgCache;
+}
+// 物理拖动总开关。关掉之后：拖动 1:1 跟手（没有滞后）、松手不甩也不掉，只吸附。
+function physicsDragOn() { return settings.physicsDrag !== false; }
+
 function flying() { return !!flyRun; }
 
-function startFlight(vx, vy) {
+// 现在这个位置松手，值不值得"掉下去"？
+// 贴在工作区底边上的时候不值得 —— 那样每次放下都会启动一次"零距离下落"，
+// 白开一个 16ms 定时器、白播一次落地压扁，手感反而不如直接吸附。
+function canFall() {
+  if (!win || win.isDestroyed()) return false;
+  if (!(fallCfg().gravity > 0)) return false;
+  const b = win.getBounds();
+  const wa = workAreaFor(b);
+  return (wa.y + wa.height) - (b.y + b.height) > FALL_MIN_GAP;
+}
+
+// mode: 'throw' = 被甩出去（无重力滑行）｜'fall' = 松手后自由下落（有重力）
+function startFlight(vx, vy, mode) {
   if (!win || win.isDestroyed()) return false;
   const b = win.getBounds();
   endWalk();
@@ -423,12 +499,14 @@ function startFlight(vx, vy) {
   dockEdge = null;                       // 飞出去就不再属于某个边了
   peeking = false;
   lockSize();
+  const m = mode === 'fall' ? 'fall' : 'throw';
   flyRun = {
+    mode: m,
     b: flight.body(b.x, b.y, vx, vy, b.width, b.height),
     lastT: Date.now(), px: b.x, py: b.y,
     bounces: 0, lastSpeed: Math.hypot(vx, vy),
   };
-  flyStats.throws++;
+  if (m === 'fall') flyStats.drops++; else flyStats.throws++;
   try { win.webContents.send('throw', Math.round(vx), Math.round(vy)); } catch (_) {}
   if (flyTimer) clearInterval(flyTimer);
   flyTimer = setInterval(flyTick, FLY_TICK);
@@ -451,8 +529,11 @@ function flyTick() {
   const b = r.b;
   // 边界跟着窗口所在的显示器走（多屏时可以跨屏飞，撞的是"那一块"的边）
   const wa = workAreaFor({ x: b.x, y: b.y, width: b.w, height: b.h });
-  const res = flight.step(b, dt, wa, throwCfg());
+  const res = flight.step(b, dt, wa, r.mode === 'fall' ? fallCfg() : throwCfg());
   r.lastSpeed = res.speed;
+  // 记下"最狠的一次着陆速度"。落地压扁的力度必须按撞击那一刻算 ——
+  // 等它停下来时速度已经归零了，拿那个去算永远是"轻轻放下"。
+  if (res.impact > (r.impact || 0)) r.impact = res.impact;
 
   if (res.bumps.length) {
     r.bounces += res.bumps.length;
@@ -481,8 +562,17 @@ function endFlight(reason) {
   const r = flyRun;
   flyRun = null;
   if (reason === 'stop') flyStats.stops++; else flyStats.aborts++;
-  const sp = Math.round(r.lastSpeed || 0);
-  try { win.webContents.send('throw-end', reason, sp, r.bounces); } catch (_) {}
+  // 落地压扁按"撞地那一刻"的速度算，而不是"停下来那一刻"（那个值恒等于 0）
+  const sp = Math.round(Math.max(r.lastSpeed || 0, r.impact || 0));
+  // 第 4 个参数告诉渲染层"这次是掉下来的还是被甩出去的"：
+  // 掉下来那一下落地压扁要更明显（它真的砸地上了），甩出去的收尾只是减速停住。
+  try { win.webContents.send('throw-end', reason, sp, r.bounces, r.mode); } catch (_) {}
+  if (r.mode === 'fall') flyStats.landed++;
+  flyStats.lastMode = r.mode;
+  flyStats.lastLandSpeed = sp;      // 只给自动化测试核对"落地力度是不是按撞击速度算的"
+  // 注意：落地**不**调 snapToEdge。重力把它摔到屏幕底边是物理结果，
+  // 不是"贴边停靠"—— 顺手把它吸到边上、4 秒后再缩进去只露出 44px，
+  // 会让人以为"掉下去就跑了"。下次真正被拖放下时才走吸附逻辑。
   try {
     const nb = win.getBounds();
     if (Number.isFinite(nb.x) && Number.isFinite(nb.y)) { settings.pos = { x: nb.x, y: nb.y }; saveSettings(); }
@@ -683,13 +773,24 @@ function animateZoomTo(targetZ) {
     const e = 1 - Math.pow(1 - t, 3);
     const z = startZ + (targetZ - startZ) * e;
     const { w, h } = sizeForZoom(z);
-    try { win.setBounds({ x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), width: w, height: h }); } catch (_) {}
+    if (flyRun) {
+      // 飞行/下落途中滚轮缩放：位置归物理，这里只改尺寸。
+      // 两边都写 setBounds 的话每 16ms 互相顶一次（物理写 x/y、缩放按旧中心写 x/y），
+      // 画面会抖成重影；而且物理体里的 w/h 不更新的话，落点会按旧高度算，
+      // 结果半个身子卡进任务栏。
+      flyRun.b.w = w; flyRun.b.h = h;
+      try { win.setSize(w, h); } catch (_) {}
+    } else {
+      try { win.setBounds({ x: Math.round(cx - w / 2), y: Math.round(cy - h / 2), width: w, height: h }); } catch (_) {}
+    }
     if (t >= 1) {
       clearInterval(zoomTween); zoomTween = null;
       // 锁"设计尺寸"而不是 getBounds()：缩放的目标值是已知的，读回来只会读到
       // DPI 取整后的抖动值（见 lockSize 上面的注释）
       const zf = sizeForZoom(targetZ);
       lockSize(zf.w, zf.h);
+      // 物理体按锁定后的真实尺寸对齐，否则尾部取整误差会让它落地时差几像素
+      if (flyRun) { flyRun.b.w = zf.w; flyRun.b.h = zf.h; }
       const nb = win.getBounds();
       if (Number.isFinite(nb.x) && Number.isFinite(nb.y)) { settings.pos = { x: nb.x, y: nb.y }; saveSettings(); }
       if (dockEdge) snapToEdge();   // 缩放后重新贴合边缘
@@ -1879,6 +1980,15 @@ function setWander(on) {
   if (!settings.wander) endWalk();
   refreshTray();
 }
+// 物理拖动：关掉就退回"窗口死跟光标 + 松手吸附"，一点惯性都不留。
+// 关的一瞬间如果正飞着/正掉着，得把它停住 —— 否则会留下一个没人管的飞行体
+// （定时器还在推窗口，用户却以为物理已经关了）。
+function setPhysicsDrag(on) {
+  settings.physicsDrag = !!on;
+  saveSettings();
+  if (!settings.physicsDrag && flying()) endFlight('abort');
+  refreshTray();
+}
 // 手动指定一个动作（菜单里的"做个动作"）
 function playGesture(id) {
   if (!id) return;
@@ -1945,6 +2055,7 @@ function menuTemplate() {
   t.push({ label: '开机自启', type: 'checkbox', checked: !!settings.openAtLogin, click: () => setOpenAtLogin(!settings.openAtLogin) });
   t.push({ label: '自动表情（空闲时自己换状态）', type: 'checkbox', checked: settings.autoMood !== false, click: () => setAutoMood(!(settings.autoMood !== false)) });
   t.push({ label: '自己散步（空闲时在桌面上走动）', type: 'checkbox', checked: settings.wander !== false, click: () => setWander(!(settings.wander !== false)) });
+  t.push({ label: '物理拖动（惯性 / 下落 / 回弹）', type: 'checkbox', checked: physicsDragOn(), click: () => setPhysicsDrag(!physicsDragOn()) });
   t.push({ label: '走两步', click: () => startWander() });
   {
     const gm = gestureMenu();
@@ -2280,6 +2391,10 @@ async function testThrow() {
   // ---- A. 松手判定这条接线（白盒）----
   // 真实的阈值/限幅在 flight.launch 里、已被单测钉死；"是不是爆发"这道门在 endDrag 里。
   // 这里只验 main.js 有没有把它们接上，以及"慢慢拖到地方再松手"不会被当成甩。
+  //
+  // 这一段先把物理拖动关掉：测的是**甩的判定**（够不够快算甩）。物理开着的时候，
+  // "不够甩"会落到另一条路上去（重力下落），那是 D 段的事。
+  settings.physicsDrag = false;
   startDrag();
   dragVelSmooth = { vx: 120, vy: 40 };
   dragHist = [{ t: Date.now(), sp: 160 }];
@@ -2294,6 +2409,15 @@ async function testThrow() {
   endDrag();
   await sleep(150);
   ok('正常拖动后松手（600px/s）不进入飞行', !flying(), 'flying=' + flying());
+
+  // 物理拖动的总开关必须真的管用：关掉之后连"真甩"也不该飞（否则开关只是个装饰品）
+  startDrag();
+  dragVelSmooth = { vx: 1760, vy: -720 };
+  dragHist = [{ t: Date.now(), sp: 2377 }];
+  endDrag();
+  await sleep(150);
+  ok('关掉物理拖动后快甩也不飞', !flying(), 'flying=' + flying());
+  settings.physicsDrag = true;      // 后面的用例都要物理开着
 
   // 真甩一下：峰值 2377，松手时还剩 1900
   startDrag();
@@ -2334,7 +2458,7 @@ async function testThrow() {
 
   const spawn = (vx, vy) => {
     if (flying()) endFlight('test');
-    startFlight(vx, vy);
+    startFlight(vx, vy, 'throw');   // 这一段测的是"甩"，不测下落
   };
 
   const size0 = win.getBounds();
@@ -2429,6 +2553,121 @@ async function testThrow() {
       } catch (e) { lines.push('shot' + ms + ' err=' + (e && e.message)); }
     }
     endFlight('test');
+    fs.writeFileSync(out, lines.join('\n') + '\n');
+    console.log(lines.filter((l) => /^shot/.test(l)).join('\n'));
+  }
+  app.exit(0);
+}
+
+// 自由下落（重力）真机回归：PET_TEST_DROP=<out.txt>
+//
+// 为什么不只靠单测：test-flight.cjs 只能证明"物理算得对"。这条链路里真正会坏的是
+// 接线 —— 松手到底有没有走 fall 分支、setPosition 有没有真的把窗口挪下去、
+// 落地会不会被"顺手吸附"到边上藏起来、停下来之后还有没有残留定时器在推。
+// 这些全在主进程里，只能在真机上量。
+async function testDrop() {
+  const out = process.env.PET_TEST_DROP;
+  await sleep(2200);
+  if (!win) { console.log('[drop] no window'); app.exit(1); return; }
+  const lines = [];
+  const ok = (name, cond, extra) =>
+    lines.push((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+  const b0 = win.getBounds();
+  const wa = workAreaFor(b0);
+  const floorY = wa.y + wa.height - b0.height;
+
+  // ---- A. 半空松手 => 重力下落 ----
+  win.setPosition(b0.x, wa.y + Math.round((wa.height - b0.height) * 0.12));
+  await sleep(120);
+  const startY = win.getBounds().y;
+  ok('起点在半空（离地 > 100px）', floorY - startY > 100, 'gap=' + (floorY - startY));
+
+  const stops0 = flyStats.stops, landed0 = flyStats.landed, drops0 = flyStats.drops;
+  startDrag();
+  dragVelSmooth = { vx: 0, vy: 0 };
+  dragHist = [{ t: Date.now(), sp: 0 }];
+  endDrag();                                  // 同一条路径：松手时的分流
+  await sleep(80);
+  ok('松手后进入下落（mode=fall）', flying() && flyRun && flyRun.mode === 'fall',
+    'flying=' + flying() + ' mode=' + (flyRun && flyRun.mode) +
+    ' gap=' + (floorY - win.getBounds().y));
+
+  // 采样整条轨迹
+  const ys = [];
+  let worstOut = false, bounces0 = flyStats.bounces;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 5000) {
+    if (!flying()) break;
+    const b = win.getBounds();
+    ys.push(b.y);
+    if (b.y < wa.y - 1 || b.y > floorY + 1) worstOut = true;
+    await sleep(50);
+  }
+  const endY = win.getBounds().y;
+  const descended = endY - startY;
+
+  ok('真的往下掉了（不是原地不动）', descended > floorY - startY - 3, '下落 ' + descended + 'px');
+  ok('整个过程没出工作区', !worstOut, 'floorY=' + floorY);
+  ok('停在底边上（±2px）', Math.abs(endY - floorY) <= 2, 'y=' + endY + ' floorY=' + floorY);
+  ok('自己停下来了（定时器收尾）', !flying() && flyTimer === null);
+  ok('走了下落分支的统计', flyStats.drops === drops0 + 1 && flyStats.landed === landed0 + 1,
+    'drops=' + flyStats.drops + ' landed=' + flyStats.landed);
+  ok('落地按撞击速度算（不是 0）', (flyStats.lastLandSpeed || 0) > 200,
+    'impact=' + flyStats.lastLandSpeed);
+  ok('落地记了一次触地', flyStats.bounces > bounces0, 'bounces+' + (flyStats.bounces - bounces0));
+  ok('落地后没有被顺手吸附', dockEdge === null && !peeking, 'dockEdge=' + dockEdge);
+
+  // ---- B. 停下来之后不许再动 ----
+  // 有重力时最容易出的毛病是"静止了但每帧还在抖 1px"：重力每帧攒一点向下速度，
+  // 地面又把它推回来。这里直接盯住最终位置 400ms。
+  const still = win.getBounds();
+  const moved = [];
+  for (let i = 0; i < 8; i++) {
+    await sleep(50);
+    const b = win.getBounds();
+    if (b.y !== still.y || b.x !== still.x) moved.push(b.y - still.y);
+  }
+  ok('静止后 400ms 内一像素都没动', moved.length === 0, 'moved=' + JSON.stringify(moved));
+
+  // ---- C. 贴着底边放下 => 走老路（不启动下落）----
+  // 这条是"不破坏原有行为"的守门人：以前贴底放下就是吸附，现在也必须还是吸附，
+  // 不能因为加了重力就变成"每次放下都开一个下落定时器"。
+  win.setPosition(b0.x, floorY);
+  await sleep(120);
+  startDrag();
+  dragVelSmooth = { vx: 0, vy: 0 };
+  dragHist = [{ t: Date.now(), sp: 0 }];
+  endDrag();
+  await sleep(120);
+  ok('贴底放下不进入下落（走原来的吸附）', !flying(), 'flying=' + flying());
+  ok('贴底放下后归位到底边', Math.abs(win.getBounds().y - floorY) <= 1,
+    'y=' + win.getBounds().y);
+
+  lines.push('stats ' + JSON.stringify(flyStats));
+  fs.writeFileSync(out, lines.join('\n') + '\n');
+  console.log('[drop] wrote ' + out);
+  console.log(lines.join('\n'));
+
+  // 视觉采样：数字对不代表"看着像掉下来"。把下落中途和落地瞬间各截一张，
+  // 连着 gait/head 的 transform 一起打出来 —— 姿态没贴上 DOM 时数字照样是全绿的。
+  if (process.env.PET_TEST_DROP_SHOTS) {
+    win.setPosition(b0.x, wa.y + Math.round((wa.height - b0.height) * 0.12));
+    await sleep(200);
+    startFlight(0, 0, 'fall');
+    for (const ms of [150, 500, 1000, 1600]) {
+      await sleep(ms === 150 ? 150 : 350);
+      try {
+        const dbg = await win.webContents.executeJavaScript(
+          'JSON.stringify({state: window.__petAnim.state, frame: window.__petAnim.pose.frame,' +
+          ' rot: Math.round(window.__petAnim.pose.rot*100)/100,' +
+          ' sy: Math.round(window.__petAnim.pose.sy*1000)/1000,' +
+          ' flying: window.__petAnim.flying,' +
+          ' gaitTf: (document.getElementById("gait").style.transform||"none")})');
+        lines.push('shot' + ms + ' ' + dbg);
+        const img = await win.webContents.capturePage();
+        fs.writeFileSync(path.resolve(out) + '.drop' + ms + '.png', img.toPNG());
+      } catch (e) { lines.push('shot' + ms + ' err=' + (e && e.message)); }
+    }
     fs.writeFileSync(out, lines.join('\n') + '\n');
     console.log(lines.filter((l) => /^shot/.test(l)).join('\n'));
   }
@@ -2664,6 +2903,7 @@ if (!gotTheLock) {
     if (process.env.PET_TEST_DRAG) testDrag();
     if (process.env.PET_TEST_WALK) testWalk();
     if (process.env.PET_TEST_THROW) testThrow();
+    if (process.env.PET_TEST_DROP) testDrop();
     if (process.env.PET_TEST_CLIP) testClip();
     if (process.env.PET_TEST_CLIPS) testClips();
     if (process.env.PET_TEST_STRIP) testStrip();
@@ -3032,7 +3272,8 @@ if (!gotTheLock) {
     setClickThrough(settings.clickThrough);
     // 走动/动作自动化测试要保持清醒：本机无人操作时系统会判定空闲，宠物会自己睡着，
     // 睡着会打断散步，测试结果就不可复现了。
-    if (!process.env.PET_TEST_WALK && !process.env.PET_TEST_CLIP && !process.env.PET_TEST_THROW) startIdleWatch();
+    if (!process.env.PET_TEST_WALK && !process.env.PET_TEST_CLIP && !process.env.PET_TEST_THROW &&
+        !process.env.PET_TEST_DROP) startIdleWatch();
     startGreetingWatch();
     startClipWatch();
     startScheduleWatch();

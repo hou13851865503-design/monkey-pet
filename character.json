@@ -108,6 +108,25 @@
     }
   },
 
+  "_dragComment": "拖拽手感 + 松手后的自由下落。\ntrailOn=光标速度超过多少 px/s 才开始「跟不上手」（低于它就是 1:1 精确跟随，否则抓不住）；\ntrailFull=到这个速度落后量拉满；trailMax=每 16ms 最多只追多少比例（0.42 = 最多落后 58% 的距离）；\nsmooth=松手判定用的速度平滑系数（越小越稳、越迟钝）；dizzySpeed=拖多快会甩晕（px/s）。\n灵敏度就是这四个数一起决定的：想更「黏手」就把 trailOn 调大、trailMax 调小；想更「甩得开」就反过来。\n\nfall 是「松手时不够快、但人还悬在半空」时的重力物理，参数直接覆盖 throw.physics 的同名项：\ngravity=重力加速度（px/s²，填 0 = 关掉重力下落，退回旧行为），floorBounce=落地回弹（比撞墙软），\nfloorFriction=落地后水平滑行的摩擦，restSpeed=落地后竖直速度低于它就「坐实」不再微弹（调太大会显得僵，太小会抖）。\n换形象要重量 trailOn / trailFull：它们跟「手移动多快算快」有关，和窗口尺寸无关，一般不随形象改。",
+  "drag": {
+    "trailOn": 420,
+    "trailFull": 2600,
+    "trailMax": 0.42,
+    "smooth": 0.4,
+    "dizzySpeed": 1500,
+    "fall": {
+      "gravity": 2200,
+      "floorBounce": 0.32,
+      "floorFriction": 2.2,
+      "restSpeed": 30,
+      "damping": 1.4,
+      "stopSpeed": 60,
+      "restitution": 0.62,
+      "maxFlight": 6000
+    }
+  },
+
   "clips": [
     {
       "id": "lookAround",
