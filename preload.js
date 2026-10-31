@@ -37,7 +37,8 @@ contextBridge.exposeInMainWorld('pet', {
   // ---------- 菜单里手动指定动作 ----------
   onGesture: (cb) => ipcRenderer.on('play-gesture', (_e, id) => cb(id)),
 
-  // ---------- 光标偏移（主进程轮询真实鼠标位置下发）----------
+  // ---------- 指针偏移（主进程轮询真实鼠标位置下发）----------
+  // 只喂"撸它"和"把睡着的叫醒"，**不再**决定朝向/倾斜 —— 那是删掉的"看向鼠标"动作。
   onCursor: (cb) => ipcRenderer.on('cursor', (_e, dx, dy) => cb(dx, dy)),
 
   // ---------- 当前帧 key（供主进程做像素级命中判定）----------
@@ -56,9 +57,6 @@ contextBridge.exposeInMainWorld('pet', {
 
   // ---------- 事件反应系统：系统闲置 -> 睡 / 醒 ----------
   onIdle: (cb) => ipcRenderer.on('idle-state', (_e, asleep) => cb(asleep)),
-
-  // ---------- 朝向：让主进程按当前光标立刻重算 ----------
-  refreshFacing: () => ipcRenderer.send('refresh-facing'),
 
   // ---------- 抽烟 / 喝酒 ----------
   onAction: (cb) => ipcRenderer.on('do-action', (_e, type) => cb(type)),

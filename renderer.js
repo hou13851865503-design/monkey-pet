@@ -1,7 +1,6 @@
 // 渲染进程：2D 八面图 + 情绪图 桌宠
 // - 17 张素材叠层，靠 opacity 交叉淡入 => 切帧连贯
 // - 朝向映射禁用 04/05/06（带背面）=> 永不露背
-// - #tilt 透视倾斜 => 伪 3D 跟随鼠标
 // - #gait 步态层 => 走路起伏 / 落地压扁 / 拖拽悬垂（anim.js 每帧算姿态）
 // - 长按 + 滚轮 => 缩放
 // - 系统闲置 => 睡觉；键鼠动 => 醒
@@ -13,7 +12,6 @@
 // 这里只负责把引擎算出来的姿态贴到 DOM 上。
 (function () {
   const stage = document.getElementById('stage');
-  const tilt = document.getElementById('tilt');
   const gaitEl = document.getElementById('gait');
   const breath = document.getElementById('breath');
   const headEl = document.getElementById('head');
@@ -257,7 +255,7 @@
   }
 
   // 只有"走动 / 拖拽 / 抛飞 / 播动作"这几件事由引擎决定帧和镜像；
-  // 其余时间（待机）还是按鼠标朝向选帧，保持原有手感。
+  // 其余时间（待机）按 dirK 选帧 —— 走完归正、自己环顾、动作收尾都落到这里。
   function animOwnsFrame() {
     return anim.walking || anim.state === 'drag' || anim.state === 'fly' || !!anim.clipId;
   }
@@ -309,14 +307,16 @@
     else if (cur === 'gesture') state = 'gesture';
     else if (cur === 'fly') state = 'fly';
     else if (prev === 'walk' || prev === 'gesture') {
+      // 走完回正脸。以前这一步是"问主进程现在鼠标在哪"，鼠标已不再决定朝向，
+      // 所以必须显式归位 —— 否则朝左走完会一直侧着脸站那儿。
+      if (prev === 'walk') dirK = 0;
       enter(focusing ? 'focus' : 'idle');
-      try { if (ipc && ipc.refreshFacing) ipc.refreshFacing(); } catch (_) {}
     }
   }
 
   function showDirection() {
     // 只有真正空闲时才换朝向帧：动作/情绪/拖拽/眩晕/专注期间一律让路，
-    // 否则鼠标一动就会把正在播的动作帧顶掉，形成来回闪。
+    // 否则动作刚起就被一张待机正脸顶掉，形成来回闪。
     if (state !== 'idle' || isBusy() || focusing) return;
     const k = dirK;
     // 只用两种朝向：正面(01) / 侧面(03)。02 那张 3/4 帧朝向与 03 不一致，弃用。
@@ -324,20 +324,9 @@
     show(k === 0 ? 'd0' : 'd2');
   }
 
-  // 带迟滞的朝向判定：只有"明显偏在侧面"才转侧脸，其余一律正脸。
-  // 条件有两个，必须同时满足 —— ① 横向够远（>SIDE_ON）② 横向明显大于纵向（不只是斜上方/斜下方）。
-  // 这样鼠标在头顶上、脚下、或斜对角时都是正脸，符合"想看见正脸偏多"。
-  const SIDE_ON = 260, SIDE_OFF = 190;
-  function dirFrom(dx, dy, cur) {
-    const ax = Math.abs(dx), ay = Math.abs(dy);
-    const sideways = ax > ay * 1.15;          // 是否"主要偏在侧面"
-    if (cur === 0) {
-      if (ax >= SIDE_ON && sideways) return dx < 0 ? -1 : 1;
-      return 0;
-    }
-    if (ax < SIDE_OFF || !sideways) return 0; // 收窄了才回正，避免边界抖动
-    return dx < 0 ? -1 : 1;
-  }
+  // 带迟滞的朝向判定已随"看向鼠标"一起删除：朝向现在只有两个来源 ——
+  // 走路时由引擎的 pose.facing 决定（人往哪走就看哪边），
+  // 待机时由 pickMood() 的"自己环顾一圈"决定。
   // 外部状态（睡 / 专注 / 抽烟喝酒 / 眩晕）期间锁住引擎，
   // 免得自主动作把正在演的画面顶掉；状态一变就重新对齐锁。
   function syncLock() {
@@ -364,11 +353,7 @@
     // 眩晕期间保持晕脸，不被切走 —— 但"被甩出去"是例外：甩晕和飞行是同一件事的
     // 前后两段，这时候拦下来就是"人已经飞了，脸还停在原地"。
     if (isDizzy() && s !== 'idle' && s !== 'fly') return;
-    if (s === 'idle') {
-      showDirection();
-      // 让主进程按"当前真实光标"重算一次，避免沿用过期朝向（鼠标停着不动时尤其明显）
-      try { if (window.pet && window.pet.refreshFacing) window.pet.refreshFacing(); } catch (_) {}
-    }
+    if (s === 'idle') showDirection();
     else if (s === 'sleepy') show('e_sleepy');
     else if (s === 'drag') show('e_surprised');
     else if (s === 'fly') show('e_surprised');
@@ -455,14 +440,14 @@
     classes.split(' ').forEach((c) => { if (c) document.body.classList.add(c); });
     state = 'action';
     show(frame);
-    // 动作期间目光落在远处，不再跟着鼠标转（忧郁的前提是"望远方"）
-    tiltTarget.ry = 7; tiltTarget.rx = 2;
+    // 以前这里还会把透视倾斜掰到 7°/-2°，让"目光落在远处"。那一层删掉之后，
+    // "望远方"由 #lean 的 tiltback(-3.2°) + #pose 的 poseSlump 承担 —— 都是真姿态，
+    // 不是套在外面的一层假视角。
     actionUntil = Date.now() + ms;
     anim.cancel();                    // 抽烟/喝酒有自己的时间轴，别叠加引擎的姿态
     anim.lock(ms + 200, 'action');
     actionTimer = setTimeout(() => {
       clearAction();
-      tiltTarget.ry = 0; tiltTarget.rx = 0;
       enter(focusing ? 'focus' : 'idle');
     }, ms);
   }
@@ -595,20 +580,14 @@
   function pickMood() {
     const r = Math.random();
     if (ipc && ipc.debug) ipc.debug('mood r=' + r.toFixed(2));
-    // 鼠标刚动过就别自己"环顾"，否则会和跟随鼠标的朝向打架
+    // 鼠标刚动过就先别自己环顾：人正跟它互动的时候，它自己扭头显得很飘
     const canLook = Date.now() - lastCursorAt > 4000;
     if (canLook && r < 0.5) {
       const old = dirK;
-      const side = Math.random() < 0.5 ? -1 : 1;
-      dirK = side;   // 只有正脸/侧脸两种帧，环顾就是直接转头
+      dirK = Math.random() < 0.5 ? -1 : 1;   // 只有正脸/侧脸两种帧，环顾就是直接转头
       showDirection();
       setTimeout(() => {
-        if (state === 'idle' && !isDizzy()) {
-          try {
-            if (window.pet && window.pet.refreshFacing) window.pet.refreshFacing();
-            else { dirK = old; showDirection(); }
-          } catch (_) { dirK = old; showDirection(); }
-        }
+        if (state === 'idle' && !isDizzy()) { dirK = old; showDirection(); }
       }, 1100 + Math.random() * 900);
     } else if (r < 0.88) {
       const list = ['cheer', 'love', 'thinking', 'shy', 'surprised'];
@@ -632,11 +611,6 @@
     moodTimer = setInterval(autoAct, 1000);
   }
 
-  // 平滑倾斜 + 上下位移（看向上方/下方时整体轻微上移/下沉）
-  const tiltTarget = { rx: 0, ry: 0 };
-  const tiltCur = { rx: 0, ry: 0 };
-  const gaze = { y: 0 };
-
   // ---- 撸它：鼠标在身上快速左右来回 => 害羞/喜欢 ----
   let revs = [], lastSign = 0, lastRub = 0;
   function rubCheck(dx, dy) {
@@ -653,31 +627,21 @@
     }
   }
 
-  // 鼠标偏移 -> 朝向 + 倾斜 + 撸
-  function handleCursor(dx, dy) {
+  // 指针移动现在只做两件事：把睡着的叫醒、喂给"撸它"判定。
+  // 它**不再**驱动任何姿态。以前这里还会算透视倾斜 + "看向光标"的朝向帧，
+  // 和正在播的动作撞得很厉害（喝酒要仰头、眩晕要摇晃、抛飞要后仰，全被那只
+  // 追光标的手按住不放），所以"看向鼠标"整个动作连同 #tilt 那一层一起删了。
+  function onPointerMove(dx, dy) {
     if (state === 'sleepy') enter('idle');
-    lastCursorAt = Date.now();
-    // 抽烟/喝酒期间不跟鼠标：头保持"望向远处"的固定偏移，否则一边忧郁一边追光标很分裂
+    lastCursorAt = Date.now();   // 人刚动过鼠标，自主动作先让一让
+    // 抽烟/喝酒期间不理指针：那段时间画面归动作
     if (Date.now() < actionUntil) return;
-    // 满量程 = 窗口宽/高的 2.4 倍（约 260px）：近处正脸、稍远微转、很远才侧面
-    const nx = clamp(dx / (Math.max(60, window.innerWidth) * 2.4), -1, 1);
-    const ny = clamp(dy / (Math.max(60, window.innerHeight) * 2.4), -1, 1);
-
-    // 身体（朝向帧）+ 眼神（随头转动）+ 透视倾斜 一起动
-    tiltTarget.ry = nx * 14;
-    tiltTarget.rx = ny * 14;
-    gaze.y = ny * 3;                       // 鼠标偏上 => 整体微升；偏下 => 微沉
-
-    if (!focusing) {
-      const next = dirFrom(dx, dy, dirK);
-      if (next !== dirK) { dirK = next; showDirection(); }
-    }
     rubCheck(dx, dy);
   }
 
   // ---- 数据源：Electron 走 IPC；浏览器预览则监听鼠标 ----
   if (ipc) {
-    ipc.onCursor(handleCursor);
+    ipc.onCursor(onPointerMove);
 
     // ---- 走动：主进程决定"去哪儿"，渲染层只把位移换算成步频 ----
     // 这里传的是**这一帧真实移动了多少像素**，不是时间 —— 所以走得快脚步就快，
@@ -774,15 +738,15 @@
   } else {
     document.addEventListener('mousemove', (e) => {
       const r = stage.getBoundingClientRect();
-      handleCursor(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+      onPointerMove(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
     });
     window.Monkey2D = {
       setEmotion: (n) => { if (n === 'idle') { enter('idle'); } else triggerEmotion(n); },
     };
   }
 
-  // ---- 主循环：先推进姿态引擎，再把姿态贴到 DOM，最后算透视倾斜 ----
-  // 顺序不能反：姿态是"这一帧的事实"，透视只是在它外面套一层视角。
+  // ---- 主循环：推进姿态引擎，再把姿态贴到 DOM ----
+  // 每一层只写自己的 transform，谁也别抢谁的（这就是分层的意义）。
   let lastActivity = '';
   function reportActivity() {
     if (!ipc || !ipc.setActivity) return;
@@ -803,8 +767,6 @@
     // 截出来的其实全是待机姿态 —— 这一版之前就踩了这个坑。
     if (frozenPose) {
       applyPose(frozenPose);
-      tiltCur.rx = 0; tiltCur.ry = 0; gaze.y = 0;
-      tilt.style.transform = 'perspective(700px) rotateY(0deg) rotateX(0deg) translateY(0px)';
       return;
     }
 
@@ -813,10 +775,6 @@
     applyAnimFrame(pose);
     syncAnimState();
     reportActivity();
-
-    tiltCur.rx += (tiltTarget.rx - tiltCur.rx) * 0.15;
-    tiltCur.ry += (tiltTarget.ry - tiltCur.ry) * 0.15;
-    tilt.style.transform = `perspective(700px) rotateY(${tiltCur.ry}deg) rotateX(${tiltCur.rx}deg) translateY(${gaze.y}px)`;
   }
   requestAnimationFrame(loop);
 

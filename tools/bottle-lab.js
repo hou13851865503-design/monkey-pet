@@ -42,13 +42,14 @@ const SETTLE = 1500;   // 最长的那条 transition 是 1.15s
 function build(state) {
   const src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const style = /<style>([\s\S]*?)<\/style>/.exec(src)[1];
-  // 连外壳一起搬：#tilt > #gait > #pose > #lean > #breath > 酒瓶。
+  // 连外壳一起搬：#gait > #pose > #lean > #breath > 酒瓶。
   // 少搬一层，祖先的自转就少了 —— 而酒液的补偿正是按"祖先转了多少"算的，
   // 所以外壳必须原样带上，不然放大台里看到的液面会比真机"更平"。
-  const i = src.indexOf('<div id="tilt">');
+  // （最外层原来是 #tilt，那层"跟随鼠标的伪 3D 透视"已经删掉了，现在 #gait 就是最外层。）
+  const i = src.indexOf('<div id="gait">');
   const j = src.indexOf('<div id="smoke">', i);
-  if (i < 0 || j < 0) throw new Error('找不到 #tilt 段落');
-  const dom = src.slice(i, j).trim();   // 未闭合的 5 层 div 由浏览器在 </body> 前自动闭合
+  if (i < 0 || j < 0) throw new Error('找不到 #gait 段落');
+  const dom = src.slice(i, j).trim();   // 未闭合的 4 层 div 由浏览器在 </body> 前自动闭合
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 ${style}

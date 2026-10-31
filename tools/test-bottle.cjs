@@ -2,7 +2,7 @@
 //
 // 这里测的是**渲染出来的真实角度**，不是算出来的角度 —— 所以必须开 Electron，
 // 用 tools/bottle-lab.js 把 index.html 的样式真跑一遍，再把
-// 「#tilt→#gait→#pose→#lean→#breath→瓶身→酒液」整条链的 matrix 解析出来累加。
+// 「#gait→#pose→#lean→#breath→瓶身→酒液」整条链的 matrix 解析出来累加。
 //
 // 要守住的核心不变量只有一条：
 //   液面在世界坐标里恒为水平（--slosh 刻意抖动的那 0.68s 除外，这里量的是稳定态）。

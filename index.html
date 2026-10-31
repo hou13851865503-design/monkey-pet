@@ -37,9 +37,6 @@
     /* 酒量变化用"一仰脖吞下去"的速度，不是液面匀速滑落 */
     body { transition: --sip .7s ease; }
 
-    /* 伪 3D 透视倾斜层（JS 每帧更新 transform） */
-    #tilt { position: absolute; inset: 0; will-change: transform; }
-
     /* 步态/挤压层：走路起伏、落地压扁、拖拽悬垂都由 JS 每帧写 transform。
        支点固定在脚底（--foot 由角色档案给），所以旋转和挤压都是"绕脚"发生的，
        看起来像踩在地上，而不是整个人在画布中心扭。 */
@@ -50,7 +47,7 @@
     }
 
     /* 姿态层：醉拳摇摆 / 瞌睡点头 / 忧郁垮肩。
-       单独一层，避免和 #tilt(鼠标透视)、#breath(呼吸) 抢同一个 transform */
+       单独一层，避免和 #breath(呼吸) 抢同一个 transform */
     #pose { position: absolute; inset: 0; transform-origin: 50% 94%; will-change: transform; }
 
     /* 前倾/仰头层：仰头灌酒、吐烟仰头、呼气下沉。用 transition 而非 animation，
@@ -153,7 +150,7 @@
 
     /* ---- 眩晕：从头皮上搬进眼睛里 ----
        这里原来还有一个"头顶转圈"的黄色螺旋（#swirl），挂在 #stage 下面 —— 也就是
-       整个窗口的坐标系里。问题是它根本不在变换链里：#tilt / #gait / #pose / #lean /
+       整个窗口的坐标系里。问题是它根本不在变换链里：#gait / #pose / #lean /
        #breath 任何一层动，头会跑，螺旋不跑。而眩晕期间 #breath 上正挂着 dizzyWobble
        在左右晃，于是那个圈一直在头顶飘着、跟眼睛越离越远 —— 看着像"贴在屏幕上"的
        装饰，不像长在猴子身上的反应。
@@ -506,7 +503,7 @@
 </head>
 <body>
   <div id="stage">
-    <div id="tilt"><div id="gait"><div id="pose"><div id="lean"><div id="breath">
+    <div id="gait"><div id="pose"><div id="lean"><div id="breath">
       <div id="head"><div id="headSpin"><img alt="" /></div></div>
       <div id="eyes"></div>
       <div id="cig"><i></i></div>
@@ -519,7 +516,7 @@
       <div id="smoke"><i></i><i></i><i></i></div>
       <div id="zzz"><b>Z</b><b>Z</b><b>Z</b></div>
       <div id="burst"></div>
-    </div></div></div></div></div>
+    </div></div></div></div>
   </div>
   <script src="anim.js"></script>
   <script src="renderer.js"></script>

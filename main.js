@@ -14,8 +14,7 @@ const flight = require('./flight'); // 抛飞物理（纯逻辑，可单独测�
 
 const WIN_W = 192;
 const WIN_H = 223;
-const POLL_MS = 80;          // 鼠标跟踪轮询
-const DEADZONE = 28;         // 光标贴近中心不更新朝向
+const POLL_MS = 80;          // 指针轮询（喂"撸它" + 贴边探出判定）
 const ZOOM_MIN = 0.5, ZOOM_MAX = 2.5;
 // 拖拽时超过这个速度（像素/秒）持续 ~80ms => 触发眩晕
 const DIZZY_SPEED = 1500;
@@ -146,7 +145,7 @@ let win;
 let tray;
 let bubbleWin = null;
 let todoWin = null;
-let facingTimer = null;
+let pointerTimer = null;
 let isDragging = false;
 let isQuitting = false;
 
@@ -251,17 +250,23 @@ function hitTick() {
   setIgnore(alphaAt(currentFrameKey, nx, ny) < 24);
 }
 
-// ---------- 光标下发 + 贴边探出检测 ----------
-let lastCursorX = null, lastCursorY = null;
-function sendCursor(force) {
+// ---------- 指针轮询：撸它 + 贴边探出检测 ----------
+// 这个轮询以前是"看向鼠标"的驱动器（算朝向、驱动透视倾斜）。那个动作删掉之后
+// 它只剩两个职责，和姿态无关：
+//   ① 贴边半隐藏：光标贴近露出的那一条 => 探出来
+//   ② 把指针相对窗口中心的偏移发给渲染层 —— 只喂"撸它"（快速来回 => 害羞/喜欢）
+//      和"把睡着的叫醒"。渲染层拿到这两个数**不再**改任何 transform。
+// 之所以还得轮询而不能靠 DOM 的 mousemove：透明区域的窗口是穿透的，收不到事件。
+let lastPointerX = null, lastPointerY = null;
+function pollPointer() {
   if (!win || win.isDestroyed() || isDragging) return;
-  if (flying()) return;          // 飞行中朝向由速度决定，别被光标拽回去
+  if (flying()) return;          // 飞行中不喂"撸它"，免得半空插一张害羞脸
   const b = win.getBounds();
   const p = screen.getCursorScreenPoint();
 
-  // 光标没动就不再打扰渲染端（否则睡眠状态会被每 80ms 的光标事件反复吵醒）
-  const moved = (p.x !== lastCursorX || p.y !== lastCursorY);
-  lastCursorX = p.x; lastCursorY = p.y;
+  // 指针没动就不再打扰渲染端（否则睡眠状态会被每 80ms 的事件反复吵醒）
+  const moved = (p.x !== lastPointerX || p.y !== lastPointerY);
+  lastPointerX = p.x; lastPointerY = p.y;
 
   // 贴边半隐藏：鼠标贴近露出的那一条 => 探出来
   if (dockEdge) {
@@ -269,18 +274,17 @@ function sendCursor(force) {
     if (peeking) {
       const s = sliverRect(dockEdge, b, wa);
       if (p.x >= s.x - 8 && p.x <= s.x + s.w + 8 && p.y >= s.y - 8 && p.y <= s.y + s.h + 8) unpeek();
-      return; // 缩进去时不做朝向跟随
+      return; // 缩进去时不理指针
     } else if (p.x >= b.x - 8 && p.x <= b.x + b.width + 8 && p.y >= b.y - 8 && p.y <= b.y + b.height + 8) {
       schedulePeek(); // 鼠标还在身上，推迟自动缩进
     }
   }
 
-  if (!moved && !force) return;
+  if (!moved) return;
   if (!win.isVisible()) return;
   const dx = p.x - (b.x + b.width / 2);
   const dy = p.y - (b.y + b.height / 2);
-  if (Math.hypot(dx, dy) < DEADZONE) win.webContents.send('cursor', 0, 0);
-  else win.webContents.send('cursor', dx, dy);
+  win.webContents.send('cursor', dx, dy);
 }
 
 // ---------- 拖拽移动 ----------
@@ -392,8 +396,6 @@ function endDrag() {
   snapToEdge();
   const nb = win.getBounds();
   if (Number.isFinite(nb.x) && Number.isFinite(nb.y)) { settings.pos = { x: nb.x, y: nb.y }; saveSettings(); }
-  // 拖完窗口换了位置：按"当前真实光标"重算朝向，避免停在拖拽时的侧面
-  sendCursor(true);
 }
 
 // ---------- 抛飞：松手后的惯性 + 撞墙反弹 ----------
@@ -485,7 +487,6 @@ function endFlight(reason) {
     const nb = win.getBounds();
     if (Number.isFinite(nb.x) && Number.isFinite(nb.y)) { settings.pos = { x: nb.x, y: nb.y }; saveSettings(); }
   } catch (_) {}
-  sendCursor(true);                      // 落地后按当前光标重新定朝向
 }
 
 // ---------- 边缘吸附 + 贴边半隐藏 ----------
@@ -663,7 +664,6 @@ function endWalk() {
     const nb = win.getBounds();
     if (Number.isFinite(nb.x)) { settings.pos = { x: nb.x, y: nb.y }; saveSettings(); }
   } catch (_) {}
-  sendCursor(true);                            // 停下后按当前光标重新定朝向
 }
 
 
@@ -1988,7 +1988,6 @@ function registerIpc() {
   });
   ipcMain.on('show-context-menu', () => petContextMenu());
   ipcMain.on('show-emotion-menu', () => openEmotionPicker());
-  ipcMain.on('refresh-facing', () => sendCursor(true));
   ipcMain.on('pick-emotion', (_e, name) => { if (name) emitEmotion(String(name)); closeEmotionPicker(); });
   ipcMain.on('close-emotion', () => closeEmotionPicker());
 
@@ -2217,10 +2216,10 @@ async function testWalk() {
         '   return [Math.round(r.top), Math.round(r.bottom), Math.round(r.height)].join("/"); })(),' +
         ' view: document.documentElement.clientHeight + "x" + document.documentElement.clientWidth,' +
         ' dpr: devicePixelRatio,' +
-        // 各层 rect：#tilt 的透视旋转会让子元素的包围盒比视口更高/更矮（这是量截图时
-        // "脚怎么忽然贴边了"的真正来源），所以在日志里把每层各自的位置都带上，
-        // 免得下次又把"透视造成的偏移"当成"姿态算错了"。
-        ' layers: ["stage","tilt","gait","pose","lean","breath"].map(function (id) {' +
+        // 各层 rect：哪一层的包围盒突然比视口高/矮，就是"脚怎么忽然贴边了"的来源。
+        // 之所以把每层都打出来：免得下次又把"某一层自己的偏移"当成"姿态算错了"。
+        // （最外层原来还有 #tilt 做鼠标透视，那层会整体撑大包围盒；它已经删了。）
+        ' layers: ["stage","gait","pose","lean","breath"].map(function (id) {' +
         '   const el = document.getElementById(id); if (!el) return id + ":none";' +
         '   const r = el.getBoundingClientRect();' +
         '   return id + "=" + Math.round(r.top) + ".." + Math.round(r.bottom) +' +
@@ -2599,7 +2598,7 @@ function createWindow() {
   lockSize(init.w, init.h);
 
   win.on('closed', () => {
-    if (facingTimer) clearInterval(facingTimer);
+    if (pointerTimer) clearInterval(pointerTimer);
   });
 
   // 关闭（Alt+F4 等）默认只"隐藏"，从托盘能叫回来；只有托盘"退出"才真正结束进程。
@@ -2617,8 +2616,8 @@ function createWindow() {
     try { win.reload(); } catch (_) {}   // 页面进程挂掉时自动重载，而不是整只消失
   });
 
-  // 测试朝向时不要用真实光标覆盖注入值
-  if (!process.env.PET_TEST_GAZE) facingTimer = setInterval(sendCursor, POLL_MS);
+  // 指针轮询：贴边探出判定 + 喂渲染层的"撸它"。与朝向无关（朝向已不由光标决定）。
+  pointerTimer = setInterval(pollPointer, POLL_MS);
   if (startHidden) win.hide();
 
   if (process.env.PET_DEBUG) {
@@ -2683,7 +2682,6 @@ if (!gotTheLock) {
     if (process.env.PET_TEST_ACTION) {
       const T0 = 1600;
       setTimeout(() => { try { win.webContents.send('do-action', process.env.PET_TEST_ACTION); } catch (_) {} }, T0);
-      setTimeout(() => { try { win.webContents.send('cursor', 320, 0); } catch (_) {} }, T0 + 400);
       // PET_TEST_SHOTS="900,2600,4200" => 动作开始后这些毫秒各截一张，后缀 _900 等
       const shots = (process.env.PET_TEST_SHOTS || '').split(',').map(Number).filter((n) => n > 0);
       const OUT = process.env.PET_TEST_ACTION_OUT;
@@ -2738,22 +2736,6 @@ if (!gotTheLock) {
           app.exit(0);
         }, 2700);
       }
-    }
-    if (process.env.PET_TEST_GAZE) {
-      setTimeout(async () => {
-        const grab = async (n) => {
-          try {
-            const img = await win.webContents.capturePage();
-            fs.writeFileSync(process.env.PET_TEST_GAZE + '_' + n + '.png', img.toPNG());
-          } catch (_) {}
-        };
-        win.webContents.send('cursor', 60, 0); await sleep(520); await grab('near');
-        win.webContents.send('cursor', 300, 300); await sleep(520); await grab('diag');
-        win.webContents.send('cursor', 380, 0); await sleep(520); await grab('right');
-        win.webContents.send('cursor', -380, 0); await sleep(520); await grab('left');
-        console.log('[gaze] captured');
-        app.exit(0);
-      }, 5200);
     }
     if (process.env.PET_TEST_DIZZY) {
       setTimeout(() => { try { win.webContents.send('emotion', 'dizzy'); } catch (_) {} }, 1600);
@@ -3049,7 +3031,7 @@ if (!gotTheLock) {
     registerIpc();
     setClickThrough(settings.clickThrough);
     // 走动/动作自动化测试要保持清醒：本机无人操作时系统会判定空闲，宠物会自己睡着，
-    // 睡着会打断散步，测试结果就不可复现了（和 PET_TEST_GAZE 关掉朝向轮询同一个道理）。
+    // 睡着会打断散步，测试结果就不可复现了。
     if (!process.env.PET_TEST_WALK && !process.env.PET_TEST_CLIP && !process.env.PET_TEST_THROW) startIdleWatch();
     startGreetingWatch();
     startClipWatch();
@@ -3097,7 +3079,7 @@ if (!gotTheLock) {
 
   app.on('will-quit', () => {
     try { globalShortcut.unregisterAll(); } catch (_) {}
-    try { if (facingTimer) clearInterval(facingTimer); } catch (_) {}
+    try { if (pointerTimer) clearInterval(pointerTimer); } catch (_) {}
     try { if (focusTimer) clearInterval(focusTimer); } catch (_) {}
     try { if (dragPoll) clearInterval(dragPoll); } catch (_) {}
     try { if (flyTimer) clearInterval(flyTimer); } catch (_) {}
