@@ -151,20 +151,16 @@
     /* 点击穿透模式提示 */
     body.clickthrough #stage { opacity: 0.8; cursor: default; }
 
-    /* ---- 眩晕：头顶转圈 + 身体摇晃 ---- */
-    #swirl {
-      position: absolute;
-      left: 50%; top: 1%;
-      width: 44%; aspect-ratio: 1 / 1;
-      transform: translateX(-50%);
-      opacity: 0;
-      transition: opacity .16s ease;
-      pointer-events: none;
-      z-index: 3;
-      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .35));
-    }
-    #swirl svg { width: 100%; height: 100%; animation: dizzySpin 1.05s linear infinite; }
-    body.dizzy #swirl { opacity: 1; }
+    /* ---- 眩晕：从头皮上搬进眼睛里 ----
+       这里原来还有一个"头顶转圈"的黄色螺旋（#swirl），挂在 #stage 下面 —— 也就是
+       整个窗口的坐标系里。问题是它根本不在变换链里：#tilt / #gait / #pose / #lean /
+       #breath 任何一层动，头会跑，螺旋不跑。而眩晕期间 #breath 上正挂着 dizzyWobble
+       在左右晃，于是那个圈一直在头顶飘着、跟眼睛越离越远 —— 看着像"贴在屏幕上"的
+       装饰，不像长在猴子身上的反应。
+       现在螺旋搬进眼球里：位置和大小都用档案的 eyes.points（和眼球同一个锚点），
+       .eye 的 overflow:hidden 负责裁切。所以"只在眼睛区域内显示"是结构保证的，
+       不是靠调坐标凑出来的。
+       只剩"身体在晃"这一层还在外层 —— 那是整只猴子的动，本来就该整只一起晃。 */
     @keyframes dizzySpin { to { transform: rotate(360deg); } }
 
     @keyframes dizzyWobble {
@@ -182,9 +178,17 @@
     }
     body.hop #breath { animation: hopUp .62s ease-out; }
 
-    /* ---- 眩晕眼：盖住原瞳孔的卡通眼球 + 旋转螺旋 ----
+    /* ---- 眩晕眼：盖住原瞳孔的卡通眼球 + 里面的旋转螺旋 ----
        位置和大小不写死在这里，改由 character.json 的 eyes 生成（换形象要重量）。
-       用椭圆而不是正圆：眼裂本来就比它高更宽，正圆总会有一头露出来。 */
+       用椭圆而不是正圆：眼裂本来就比它高更宽，正圆总会有一头露出来。
+
+       两点是"效果别跑偏"的关键：
+       ① 居中靠 transform: translate(-50%, -50%)，所以**绝不能在 .eye 上挂 transform
+          动画** —— 动画会整条覆盖 transform，居中的那一半位移直接丢失，
+          眼球会当场往右下角窜半个身位。旋转一律挂在里面的 svg 上。
+       ② 想裁住"只在眼睛里的东西"，靠的是 .eye 自己的 overflow:hidden + 圆角，
+          别再套 clip-path：那一层如果和 border-radius 的椭圆不重合，
+          边缘会露出一道极细的缝。 */
     #eyes {
       position: absolute; inset: 0;
       z-index: 4;
@@ -195,14 +199,16 @@
     body.dizzy #eyes { opacity: 1; }
     .eye {
       position: absolute;
-      transform: translate(-50%, -50%);
+      transform: translate(-50%, -50%);   /* 只负责居中；挂动画会把它冲掉，见上 */
       border-radius: 50%;
       background: #fbf7ef;
       box-shadow: inset 0 0 0 1px rgba(96, 64, 34, .3), 0 1px 2px rgba(0, 0, 0, .16);
-      display: flex; align-items: center; justify-content: center;
-      overflow: hidden;
+      display: block;
+      overflow: hidden;                   /* 螺旋出不了眼球 */
     }
-    .eye svg { width: 86%; height: 86%; animation: dizzySpin .9s linear infinite; }
+    /* preserveAspectRatio=none：眼裂是横椭圆，螺旋跟着拉成横椭圆才铺满；
+       等比缩放的话左右两端会各空出一条白边。 */
+    .eye svg { position: absolute; inset: 0; width: 100%; height: 100%; animation: dizzySpin .9s linear infinite; }
 
     /* ---- 抽烟：叼在嘴角的烟，会随呼吸变亮、随燃烧变短、会弹灰 ---- */
     #cig, #bottle, #smoke, #zzz, #burst {
@@ -500,13 +506,6 @@
 </head>
 <body>
   <div id="stage">
-    <div id="swirl">
-      <svg viewBox="0 0 64 64" aria-hidden="true">
-        <path d="M32 9a23 23 0 1 1 -16 40" fill="none" stroke="#ffd54a" stroke-width="4.5" stroke-linecap="round" opacity=".95"/>
-        <path d="M32 20a12 12 0 1 0 9 21" fill="none" stroke="#ffd54a" stroke-width="3.5" stroke-linecap="round" opacity=".75"/>
-        <circle cx="32" cy="32" r="2.6" fill="#ffd54a"/>
-      </svg>
-    </div>
     <div id="tilt"><div id="gait"><div id="pose"><div id="lean"><div id="breath">
       <div id="head"><div id="headSpin"><img alt="" /></div></div>
       <div id="eyes"></div>

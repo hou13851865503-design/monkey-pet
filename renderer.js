@@ -38,7 +38,7 @@
   }
   for (let i = 0; i < 8; i++) addFrame('d' + i, `./assets/${String(i + 1).padStart(2, '0')}.png`);
 
-  // ---- 眩晕眼：在两只眼睛的位置画旋转螺旋（盖住原瞳孔）----
+  // ---- 眩晕眼：在两只眼睛的位置画旋转的螺旋（盖住原瞳孔）----
   function spiralPath(cx, cy, r0, r1, turns, steps) {
     let d = '';
     for (let i = 0; i <= steps; i++) {
@@ -123,19 +123,32 @@
     }
   } catch (_) {}
 
-  // ---- 眩晕眼：盖住原瞳孔的卡通眼球 + 旋转螺旋 ----
+  // ---- 眩晕眼：盖住原瞳孔的卡通眼球 + 眼球里的旋转螺旋 ----
   // 几何全部来自档案（character.json 的 eyes），不是写死的像素。
   // 这是之前踩过的坑：位置写死在 CSS 里，素材一换（甚至只是量错 2%）就会露出半个
   // 原瞳孔，看着像多长了一只眼。所以现在按档案生成，档案没给就干脆不画。
+  //
+  // 螺旋本身就是"眩晕"，它必须在**眼睛里**转。原来它挂在 #stage 下的 #swirl 上，
+  // 也就是窗口坐标系 —— 眩晕时身体在 dizzyWobble、头在跑，那个圈不跟着跑，
+  // 就变成贴在屏幕上的一张贴纸。搬进来之后，锚点、尺寸、裁切全跟着眼球走。
   (function buildDizzyEyes() {
     const host = document.getElementById('eyes');
     if (!host) return;
     host.innerHTML = '';
     const def = profile.eyes;
     const pts = def && Array.isArray(def.points) ? def.points : [];
-    if (!pts.length) return;   // 没量过眼球位置：只靠头顶转圈 + 身体摇晃，不硬画
+    if (!pts.length) return;   // 没量过眼球位置：只靠身体摇晃，不硬画
     const ink = def.ink || '#2f2116';
-    const d = spiralPath(12, 12, 1, 8.4, 2.6, 120);
+    // 圈数是被尺寸逼出来的，不是随手写的。眼球只有 27×23 px，螺旋每转一圈半径才
+    // 前进 (8.8-1.6)/圈数；圈数一多，相邻两圈的白缝就比线宽还窄，整只眼睛会糊成
+    // 一个黄甜甜圈（2.55 圈 / 2.5px 就是那样）。1.6 圈时缝宽 (7.2/1.6 - 1.9) ≈ 2.6
+    // 单位 ≈ 2.8px，比线宽 1.9 还宽 —— 这才是"看得出是螺旋"的下限。
+    // 圆心再点一个墨色瞳点，小尺寸下它负责"这是一只眼睛"，螺旋负责"在晕"。
+    const svg =
+      '<svg viewBox="0 0 24 24" preserveAspectRatio="none" aria-hidden="true">' +
+        '<path d="' + spiralPath(12, 12, 1.6, 8.8, 1.6, 96) + '" fill="none" stroke="#e2870c" stroke-width="1.9" stroke-linecap="round"/>' +
+        '<circle cx="12" cy="12" r="1.5" fill="' + ink + '"/>' +
+      '</svg>';
     pts.forEach((pt) => {
       const el = document.createElement('i');
       el.className = 'eye';
@@ -143,8 +156,7 @@
       el.style.top = (pt.y * 100).toFixed(3) + '%';
       el.style.width = (pt.w * 100).toFixed(3) + '%';
       el.style.height = (pt.h * 100).toFixed(3) + '%';
-      el.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + d +
-        '" fill="none" stroke="' + ink + '" stroke-width="1.6" stroke-linecap="round"/></svg>';
+      el.innerHTML = svg;
       host.appendChild(el);
     });
   })();

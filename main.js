@@ -2634,12 +2634,9 @@ function createWindow() {
 // ---------- 单实例锁 ----------
 // 自动化测试要能和"正在跑的那只桌宠"同时存在：否则锁会让测试进程立刻静默退出，
 // 屏幕上什么都没有、日志也没有一行 —— 排查起来特别像"启动就崩"。
-const TEST_ENV = [
-  'PET_TEST_CLIPS', 'PET_TEST_CLIP', 'PET_TEST_WALK', 'PET_TEST_DRAG',
-  'PET_TEST_TAP', 'PET_TEST_EMOTION', 'PET_TEST_RECT', 'PET_TEST_SHOTS', 'PET_TEST_ACTION',
-  'PET_TEST_STRIP', 'PET_TEST_THROW',
-];
-const testRun = TEST_ENV.some((k) => !!process.env[k]);
+// 判定按**前缀**来，不维护白名单：白名单漏一个（PET_TEST_DIZZY 就漏过），
+// 那个测试就会在"桌宠正开着"的时候静默什么都不做，看起来像代码没生效。
+const testRun = Object.keys(process.env).some((k) => k.startsWith('PET_TEST_'));
 const gotTheLock = testRun ? true : app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
